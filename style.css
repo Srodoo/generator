@@ -476,3 +476,24 @@ button,.primary-btn{border:0;border-radius:11px!important;padding:11px 16px!impo
 .auto-forge-report{max-width:100%!important;margin:20px 0!important}.auto-forge-card{background:radial-gradient(circle at 100% 0%,rgba(68,147,255,.12),transparent 34%),linear-gradient(145deg,rgba(26,31,50,.97),rgba(14,19,30,.98))!important;border:1px solid rgba(124,92,255,.35)!important;border-radius:18px!important;padding:20px!important;box-shadow:var(--shadow)!important}.auto-forge-title{border-bottom:1px solid rgba(112,126,154,.14);padding-bottom:13px}.auto-forge-title strong{font-size:18px}.confidence{font-weight:800;border:1px solid #344159;background:#111725!important}.confidence.high{color:#7ce6aa;border-color:rgba(64,216,138,.46)!important}.confidence.medium{color:#f8d47b;border-color:rgba(247,198,92,.42)!important}.confidence.low{color:#ff8f99;border-color:rgba(255,107,121,.42)!important}.auto-forge-grid{margin-top:14px;gap:11px!important}.auto-forge-grid div{background:linear-gradient(180deg,rgba(17,23,36,.94),rgba(12,17,27,.94))!important;border:1px solid rgba(91,108,136,.16);border-radius:12px!important;padding:12px!important}.auto-forge-grid span{color:#8392aa!important;text-transform:uppercase;letter-spacing:.06em;font-size:11px!important}.auto-forge-grid strong{color:#f1f5ff}.auto-forge-note{background:rgba(124,92,255,.06);border-left:3px solid #7159ff;padding:9px 11px;border-radius:5px 9px 9px 5px;color:#9caac0!important}
 ::-webkit-scrollbar{width:10px;height:10px}::-webkit-scrollbar-track{background:#080b12}::-webkit-scrollbar-thumb{background:#2b3549;border-radius:999px;border:2px solid #080b12}::-webkit-scrollbar-thumb:hover{background:#3a4760}
 @media(max-width:760px){.cold-copy-row{grid-template-columns:1fr}.generator-actions{flex-direction:column;align-items:stretch!important}.generator-actions button{width:100%}.auto-forge-grid{grid-template-columns:1fr!important}}
+
+
+.auto-forge-controls{
+    margin-top:18px;
+    max-width:360px;
+    padding:14px 16px;
+    border:1px solid rgba(124,92,255,.26);
+    border-radius:14px;
+    background:linear-gradient(180deg,rgba(23,30,45,.82),rgba(13,18,29,.88));
+    box-shadow:0 10px 26px rgba(0,0,0,.16);
+}
+.auto-forge-controls label{
+    display:block;
+    margin-bottom:8px;
+    color:#aebbd0;
+    font-size:13px;
+    font-weight:700;
+    text-transform:uppercase;
+    letter-spacing:.05em;
+}
+.auto-forge-controls select{margin-bottom:0!important;}

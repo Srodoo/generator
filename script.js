@@ -74,6 +74,8 @@ const losowaniaGier = {
 
 let analysisWindow = 20;
 let hotColdCount = 5;
+let autoForgeMode = "auto";
+let autoForgeSecondaryOverride = null;
 function getCurrentGameKey() {
 
     return Object.keys(games).find(
@@ -180,8 +182,75 @@ statsBtn.addEventListener("click", () => {
     pokazStatystyki();
 
 });
-csvFile.addEventListener("change", (e) => {
+function detectCsvDelimiter(line) {
+    const candidates = [";", "\t", ","];
+    return candidates
+        .map(delimiter => ({ delimiter, count: line.split(delimiter).length }))
+        .sort((a, b) => b.count - a.count)[0].delimiter;
+}
 
+function parseImportedDraw(cols) {
+    const numer = Number(cols[0]);
+    const dzien = Number(cols[1]);
+    const miesiac = Number(cols[2]);
+    const rok = Number(cols[3]);
+
+    if (![numer, dzien, miesiac, rok].every(Number.isFinite)) {
+        return null;
+    }
+
+    const numericTail = cols
+        .slice(4)
+        .map(value => Number(String(value).replace(',', '.')))
+        .filter(Number.isFinite);
+
+    const gameKey = getCurrentGameKey();
+    const mainCount = currentGame === games.multi ? 20 : currentGame.count;
+    const mainNumbers = numericTail.slice(0, mainCount);
+
+    if (
+        mainNumbers.length !== mainCount ||
+        mainNumbers.some(n => !Number.isInteger(n) || n < 1 || n > currentGame.max) ||
+        new Set(mainNumbers).size !== mainNumbers.length
+    ) {
+        return null;
+    }
+
+    const draw = {
+        numer,
+        data:
+            `${String(dzien).padStart(2, "0")}.` +
+            `${String(miesiac).padStart(2, "0")}.` +
+            `${rok}`,
+        liczby: mainNumbers
+    };
+
+    const rest = numericTail.slice(mainCount);
+
+    if (gameKey === "euro") {
+        const euroNumbers = rest
+            .filter(n => Number.isInteger(n) && n >= 1 && n <= currentGame.euroMax)
+            .slice(0, currentGame.euroCount);
+
+        if (euroNumbers.length === currentGame.euroCount) {
+            draw.euroNumbers = euroNumbers;
+        }
+    }
+
+    if (gameKey === "extra") {
+        const extraNumber = rest.find(
+            n => Number.isInteger(n) && n >= 1 && n <= currentGame.extraMax
+        );
+
+        if (extraNumber !== undefined) {
+            draw.extraNumber = extraNumber;
+        }
+    }
+
+    return draw;
+}
+
+csvFile.addEventListener("change", (e) => {
     const file = e.target.files[0];
 
     if (!file) {
@@ -192,111 +261,48 @@ csvFile.addEventListener("change", (e) => {
     const reader = new FileReader();
 
     reader.onload = function(event) {
-
         try {
-
             const text = event.target.result;
-
             const lines = text
                 .split(/\r?\n/)
                 .filter(line => line.trim() !== "");
 
+            if (!lines.length) {
+                throw new Error("Plik jest pusty.");
+            }
+
+            const delimiter = detectCsvDelimiter(lines[0]);
+            const parsedDraws = [];
+            let ignoredRows = 0;
+
+            lines.forEach(line => {
+                const cols = line.split(delimiter).map(col => col.trim());
+                const draw = parseImportedDraw(cols);
+
+                if (draw) parsedDraws.push(draw);
+                else ignoredRows++;
+            });
+
+            if (!parsedDraws.length) {
+                throw new Error(
+                    `Nie znaleziono poprawnych losowań dla ${currentGame.title}. ` +
+                    `Sprawdź format CSV i kolejność kolumn.`
+                );
+            }
+
             const gameDraws = getCurrentGameDraws();
-
-gameDraws.length = 0;
-
-            // pomijamy nagłówek CSV
-            for (let i = 1; i < lines.length; i++) {
-
-                const cols = lines[i]
-                    .split(";")
-                    .map(col => col.trim());
-
-                if (currentGame === games.extra) {
-
-                    const dzien = Number(cols[1]);
-                    const miesiac = Number(cols[2]);
-                    const rok = Number(cols[3]);
-
-                    const liczby = [
-                        Number(cols[4]),
-                        Number(cols[5]),
-                        Number(cols[6]),
-                        Number(cols[7]),
-                        Number(cols[8])
-                    ];
-
-                    const extraNumber = Number(cols[10]);
-
-                    gameDraws.push({
-                        numer: Number(cols[0]),
-                        data:
-                            `${String(dzien).padStart(2, "0")}.` +
-                            `${String(miesiac).padStart(2, "0")}.` +
-                            `${rok}`,
-                        liczby: liczby,
-                        extraNumber: extraNumber
-                    });
-                }
-            
-            if (currentGame === games.mini) {
-
-    const dzien = Number(cols[1]);
-    const miesiac = Number(cols[2]);
-    const rok = Number(cols[3]);
-
-    const liczby = [
-        Number(cols[4]),
-        Number(cols[5]),
-        Number(cols[6]),
-        Number(cols[7]),
-        Number(cols[8])
-    ];
-
-    gameDraws.push({
-        numer: Number(cols[0]),
-        data:
-            `${String(dzien).padStart(2, "0")}.` +
-            `${String(miesiac).padStart(2, "0")}.` +
-            `${rok}`,
-        liczby: liczby
-    });
-}
-
-if (currentGame === games.multi) {
-
-    const dzien = Number(cols[1]);
-    const miesiac = Number(cols[2]);
-    const rok = Number(cols[3]);
-
-    const liczby = cols
-        .slice(4, 24)
-        .map(Number);
-
-    gameDraws.push({
-        numer: Number(cols[0]),
-        data:
-            `${String(dzien).padStart(2, "0")}.` +
-            `${String(miesiac).padStart(2, "0")}.` +
-            `${rok}`,
-        liczby: liczby
-    });
-}
-}
+            gameDraws.length = 0;
+            gameDraws.push(...parsedDraws);
 
             console.log("Zaimportowane losowania:", gameDraws);
 
-alert(
-    `✅ Zaimportowano ${gameDraws.length} losowań dla ${currentGame.title}!`
-);
-
-        } catch (error) {
-
-            console.error("Błąd importu:", error);
-
             alert(
-                `❌ Błąd podczas importowania pliku:\n\n${error.message}`
+                `✅ Zaimportowano ${gameDraws.length} losowań dla ${currentGame.title}!` +
+                (ignoredRows > 0 ? `\nPominięto wierszy: ${ignoredRows}` : "")
             );
+        } catch (error) {
+            console.error("Błąd importu:", error);
+            alert(`❌ Błąd podczas importowania pliku:\n\n${error.message}`);
         }
     };
 
@@ -306,6 +312,7 @@ alert(
 
     reader.readAsText(file);
 });
+
 const contentArea = document.getElementById("contentArea");
 
 
@@ -351,6 +358,16 @@ ${currentGame === games.multi ? `
 </div>
 
 ` : ""}
+
+<div class="auto-forge-controls">
+    <label for="autoForgeMode">Tryb analizy AUTO FORGE</label>
+    <select id="autoForgeMode">
+        <option value="auto" selected>AUTO — 5 / 10 / 15</option>
+        <option value="5">Tylko 5 ostatnich</option>
+        <option value="10">Tylko 10 ostatnich</option>
+        <option value="15">Tylko 15 ostatnich</option>
+    </select>
+</div>
 
 <div class="generator-actions">
 <button id="generateBtn" class="primary-btn">
@@ -525,6 +542,12 @@ ${currentGame.ranges.map((value,index)=>{
     const generateBtn = document.getElementById("generateBtn");
     const autoForgeBtn = document.getElementById("autoForgeBtn");
 
+    const autoForgeModeSelect = document.getElementById("autoForgeMode");
+    autoForgeModeSelect.value = autoForgeMode;
+    autoForgeModeSelect.addEventListener("change", () => {
+        autoForgeMode = autoForgeModeSelect.value;
+    });
+
     generateBtn.addEventListener("click", generateMiniLotto);
     autoForgeBtn.addEventListener("click", runAutoForge);
     if (currentGame === games.multi) {
@@ -653,6 +676,64 @@ function analyzeAutoForgeWindow(draws, windowSize) {
     };
 }
 
+function getAutoForgeWindowConfig() {
+    if (autoForgeMode === "5" || autoForgeMode === "10" || autoForgeMode === "15") {
+        return {
+            requestedWindows: [Number(autoForgeMode)],
+            weights: [1],
+            label: `${autoForgeMode}`
+        };
+    }
+
+    return {
+        requestedWindows: [5, 10, 15],
+        weights: [0.40, 0.35, 0.25],
+        label: "5 / 10 / 15"
+    };
+}
+
+function buildSecondaryRanking(draws, requestedWindows, weights, max, extractor) {
+    const scores = new Array(max + 1).fill(0);
+    let totalWeight = 0;
+
+    requestedWindows.forEach((windowSize, index) => {
+        const sample = draws.slice(-Math.min(windowSize, draws.length));
+        if (!sample.length) return;
+
+        const counts = new Array(max + 1).fill(0);
+        sample.forEach(draw => {
+            extractor(draw)
+                .filter(n => Number.isInteger(n) && n >= 1 && n <= max)
+                .forEach(n => counts[n]++);
+        });
+
+        const weight = weights[index];
+        totalWeight += weight;
+        for (let n = 1; n <= max; n++) {
+            scores[n] += (counts[n] / sample.length) * weight;
+        }
+    });
+
+    if (!totalWeight) return [];
+
+    return scores
+        .map((score, number) => ({ number, score: score / totalWeight }))
+        .filter(item => item.number > 0)
+        .sort((a, b) => b.score - a.score || a.number - b.number);
+}
+
+function drawFromPool(pool, count, excluded = []) {
+    const available = pool.filter(n => !excluded.includes(n));
+    const selected = [];
+
+    while (selected.length < count && available.length) {
+        const index = Math.floor(Math.random() * available.length);
+        selected.push(available.splice(index, 1)[0]);
+    }
+
+    return selected.sort((a, b) => a - b);
+}
+
 function buildAutoForgeAnalysis() {
     const draws = getCurrentGameDraws();
     const targetCount = getAutoForgeTargetCount();
@@ -664,8 +745,9 @@ function buildAutoForgeAnalysis() {
         };
     }
 
-    const requestedWindows = [5, 10, 15];
-    const weights = [0.40, 0.35, 0.25];
+    const windowConfig = getAutoForgeWindowConfig();
+    const requestedWindows = windowConfig.requestedWindows;
+    const weights = windowConfig.weights;
 
     const windowAnalyses = requestedWindows.map(
         size => analyzeAutoForgeWindow(draws, size)
@@ -823,9 +905,30 @@ function buildAutoForgeAnalysis() {
             ? `↓ W DÓŁ (${migrationDelta.toFixed(1)})`
             : `→ STABILNIE (${migrationDelta >= 0 ? "+" : ""}${migrationDelta.toFixed(1)})`;
 
+    let secondary = null;
+
+    if (currentGame === games.euro) {
+        const ranking = buildSecondaryRanking(
+            draws, requestedWindows, weights, currentGame.euroMax,
+            draw => draw.euroNumbers || []
+        );
+        const pool = ranking.slice(0, Math.min(5, ranking.length)).map(item => item.number);
+        secondary = { type: "euro", pool, count: currentGame.euroCount };
+    }
+
+    if (currentGame === games.extra) {
+        const ranking = buildSecondaryRanking(
+            draws, requestedWindows, weights, currentGame.extraMax,
+            draw => Number.isInteger(draw.extraNumber) ? [draw.extraNumber] : []
+        );
+        const pool = ranking.slice(0, Math.min(2, ranking.length)).map(item => item.number);
+        secondary = { type: "extra", pool, count: currentGame.extraCount };
+    }
+
     return {
         ok: true,
         targetCount,
+        modeLabel: windowConfig.label,
         windowsUsed: windowAnalyses.map(x => x.windowSize).join(" / "),
         structure,
         wantedEven,
@@ -838,7 +941,8 @@ function buildAutoForgeAnalysis() {
         requiredCount,
         migrationText,
         confidence,
-        sectorShares
+        sectorShares,
+        secondary
     };
 }
 
@@ -890,7 +994,7 @@ function renderAutoForgeReport(analysis) {
             </div>
 
             <div class="auto-forge-grid">
-                <div><span>Okna</span><strong>5 / 10 / 15 (${analysis.windowsUsed})</strong></div>
+                <div><span>Tryb analizy</span><strong>${analysis.modeLabel} (${analysis.windowsUsed})</strong></div>
                 <div><span>Struktura</span><strong>${analysis.structure.join("-")}</strong></div>
                 <div><span>Parzystość</span><strong>${analysis.wantedEven}/${analysis.wantedOdd}</strong></div>
                 <div><span>Suma</span><strong>${analysis.sumMin}-${analysis.sumMax} (cel ${analysis.targetSum})</strong></div>
@@ -898,10 +1002,13 @@ function renderAutoForgeReport(analysis) {
                 <div><span>HOT</span><strong>${analysis.hotPool.join(", ")}</strong></div>
                 <div><span>HOT → losuj</span><strong>${analysis.requiredCount} z ${analysis.hotPool.length}</strong></div>
                 <div><span>COLD → wyklucz</span><strong>${analysis.coldPool.join(", ")}</strong></div>
+                ${analysis.secondary ? `
+                <div><span>${analysis.secondary.type === "euro" ? "⭐ Euro — pula" : "⭐ Extra — pula"}</span><strong>${analysis.secondary.pool.length ? analysis.secondary.pool.join(", ") : "brak danych dodatkowych"}</strong></div>
+                ` : ""}
             </div>
 
             <p class="auto-forge-note">
-                Spójność opisuje zgodność krótkich okien analizy, a nie prawdopodobieństwo trafienia.
+                Spójność opisuje stabilność danych użytych przez AUTO FORGE; w trybie 5/10/15 uwzględnia zgodność kilku okien.
             </p>
         </div>
     `;
@@ -918,8 +1025,37 @@ function runAutoForge() {
     applyAutoForgeSettings(analysis);
     renderAutoForgeReport(analysis);
 
-    // Po ustawieniu wszystkich parametrów używamy istniejącego,
-    // sprawdzonego generatora i jego walidacji.
+    autoForgeSecondaryOverride = null;
+
+    if (analysis.secondary?.pool?.length) {
+        if (analysis.secondary.type === "euro") {
+            const excluded = document.getElementById("euroExcludeFilter")?.checked
+                ? (document.getElementById("euroExcludedNumbers")?.value || "")
+                    .split(",")
+                    .map(n => Number(n.trim()))
+                    .filter(Number.isInteger)
+                : [];
+
+            const selected = drawFromPool(
+                analysis.secondary.pool,
+                analysis.secondary.count,
+                excluded
+            );
+
+            if (selected.length === analysis.secondary.count) {
+                autoForgeSecondaryOverride = { type: "euro", numbers: selected };
+            }
+        }
+
+        if (analysis.secondary.type === "extra") {
+            const selected = drawFromPool(analysis.secondary.pool, 1);
+            if (selected.length) {
+                autoForgeSecondaryOverride = { type: "extra", numbers: selected };
+            }
+        }
+    }
+
+    // Po ustawieniu parametrów używamy istniejącego generatora i walidacji.
     generateMiniLotto();
 }
 
@@ -1238,21 +1374,17 @@ let euroNumbers = [];
 let extraNumber = [];
 
 if (currentGame === games.euro) {
-
-    euroNumbers = generateNumbers(
-        currentGame.euroCount,
-        currentGame.euroMax
-    );
-
+    euroNumbers =
+        autoForgeSecondaryOverride?.type === "euro"
+            ? [...autoForgeSecondaryOverride.numbers]
+            : generateNumbers(currentGame.euroCount, currentGame.euroMax);
 }
 
 if (currentGame === games.extra) {
-
-    extraNumber = generateNumbers(
-        currentGame.extraCount,
-        currentGame.extraMax
-    );
-
+    extraNumber =
+        autoForgeSecondaryOverride?.type === "extra"
+            ? [...autoForgeSecondaryOverride.numbers]
+            : generateNumbers(currentGame.extraCount, currentGame.extraMax);
 }
 
     numbersDiv.innerHTML = "";
@@ -1389,6 +1521,8 @@ ${currentGame.ranges.map((value,index)=>{
 </div>
 
 `;});
+
+    autoForgeSecondaryOverride = null;
 
 }function generateNumbers(count, max){
 if (currentGame === games.multi) {
