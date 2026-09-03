@@ -73,6 +73,7 @@ const losowaniaGier = {
 };
 
 let analysisWindow = 20;
+let hotColdCount = 5;
 function getCurrentGameKey() {
 
     return Object.keys(games).find(
@@ -351,11 +352,19 @@ ${currentGame === games.multi ? `
 
 ` : ""}
 
+<div class="generator-actions">
 <button id="generateBtn" class="primary-btn">
     Generuj liczby
 </button>
 
-    <<div id="numbers" class="ball-container"></div>
+<button id="autoForgeBtn" class="primary-btn auto-forge-btn">
+    🧠 AUTO FORGE
+</button>
+</div>
+
+<div id="autoForgeReport" class="auto-forge-report"></div>
+
+    <div id="numbers" class="ball-container"></div>
 
 ${currentGame === games.euro ? `
 <div id="euroNumbers" class="ball-container"></div>
@@ -464,6 +473,33 @@ ${currentGame.ranges.map((value,index)=>{
     type="text"
     id="excludedNumbers"
     placeholder="np. 3,7,18,41">
+
+<hr>
+
+<h3>📌 Liczby obowiązkowe</h3>
+
+<label>
+    <input type="checkbox" id="requiredFilter">
+    Aktywuj filtr
+</label>
+
+<br><br>
+
+<label>Pula liczb obowiązkowych</label>
+<input
+    type="text"
+    id="requiredNumbers"
+    placeholder="np. 7,12,18,23,31,42">
+
+<br><br>
+
+<label>Ile liczb wylosować z tej puli?</label>
+<input
+    type="number"
+    id="requiredCount"
+    min="0"
+    max="${currentGame.count}"
+    value="0">
     ${currentGame === games.euro ? `
 <br><br>
 
@@ -487,8 +523,10 @@ ${currentGame.ranges.map((value,index)=>{
 `;
 
     const generateBtn = document.getElementById("generateBtn");
+    const autoForgeBtn = document.getElementById("autoForgeBtn");
 
     generateBtn.addEventListener("click", generateMiniLotto);
+    autoForgeBtn.addEventListener("click", runAutoForge);
     if (currentGame === games.multi) {
 
     const multiCount = document.getElementById("multiCount");
@@ -505,6 +543,386 @@ ${currentGame.ranges.map((value,index)=>{
 }
 
 }
+
+function clamp(value, min, max) {
+    return Math.max(min, Math.min(max, value));
+}
+
+function average(values) {
+    if (!values.length) return 0;
+    return values.reduce((a, b) => a + b, 0) / values.length;
+}
+
+function standardDeviation(values) {
+    if (values.length < 2) return 0;
+    const avg = average(values);
+    const variance = average(values.map(value => (value - avg) ** 2));
+    return Math.sqrt(variance);
+}
+
+function getAutoForgeTargetCount() {
+    if (currentGame === games.multi) {
+        return Number(document.getElementById("multiCount")?.value || currentGame.count);
+    }
+    return currentGame.count;
+}
+
+function getSectorIndex(number) {
+    for (let i = 0; i < currentGame.ranges.length; i++) {
+        if (number <= currentGame.ranges[i]) return i;
+    }
+    return currentGame.ranges.length - 1;
+}
+
+function apportionCounts(shares, totalCount) {
+    const raw = shares.map(share => share * totalCount);
+    const result = raw.map(value => Math.floor(value));
+    let remaining = totalCount - result.reduce((a, b) => a + b, 0);
+
+    const order = raw
+        .map((value, index) => ({
+            index,
+            remainder: value - Math.floor(value)
+        }))
+        .sort((a, b) => b.remainder - a.remainder);
+
+    let cursor = 0;
+    while (remaining > 0 && order.length) {
+        const index = order[cursor % order.length].index;
+
+        const start = index === 0 ? 1 : currentGame.ranges[index - 1] + 1;
+        const end = currentGame.ranges[index];
+        const capacity = end - start + 1;
+
+        if (result[index] < capacity) {
+            result[index]++;
+            remaining--;
+        }
+        cursor++;
+
+        if (cursor > 1000) break;
+    }
+
+    return result;
+}
+
+function analyzeAutoForgeWindow(draws, windowSize) {
+    const sample = draws.slice(-Math.min(windowSize, draws.length));
+    const numberHits = new Array(currentGame.max + 1).fill(0);
+    const sectorHits = new Array(currentGame.ranges.length).fill(0);
+
+    let totalNumbers = 0;
+    let evenNumbers = 0;
+    const drawMeans = [];
+
+    sample.forEach(draw => {
+        const validNumbers = (draw.liczby || []).filter(
+            n => Number.isInteger(n) && n >= 1 && n <= currentGame.max
+        );
+
+        if (!validNumbers.length) return;
+
+        validNumbers.forEach(number => {
+            numberHits[number]++;
+            sectorHits[getSectorIndex(number)]++;
+            totalNumbers++;
+            if (number % 2 === 0) evenNumbers++;
+        });
+
+        drawMeans.push(
+            validNumbers.reduce((a, b) => a + b, 0) / validNumbers.length
+        );
+    });
+
+    const frequencies = numberHits.map((hits, number) => {
+        if (number === 0 || sample.length === 0) return 0;
+        return hits / sample.length;
+    });
+
+    const sectorShares = sectorHits.map(
+        hits => totalNumbers ? hits / totalNumbers : 0
+    );
+
+    return {
+        windowSize: sample.length,
+        frequencies,
+        sectorShares,
+        evenShare: totalNumbers ? evenNumbers / totalNumbers : 0.5,
+        meanNumber: drawMeans.length ? average(drawMeans) : (currentGame.max + 1) / 2,
+        meanSpread: standardDeviation(drawMeans)
+    };
+}
+
+function buildAutoForgeAnalysis() {
+    const draws = getCurrentGameDraws();
+    const targetCount = getAutoForgeTargetCount();
+
+    if (!draws.length) {
+        return {
+            ok: false,
+            message: "Brak danych losowań. Najpierw zaimportuj CSV dla wybranej gry."
+        };
+    }
+
+    const requestedWindows = [5, 10, 15];
+    const weights = [0.40, 0.35, 0.25];
+
+    const windowAnalyses = requestedWindows.map(
+        size => analyzeAutoForgeWindow(draws, size)
+    );
+
+    // Jeżeli mamy mniej niż 15 losowań, nadal działamy, ale liczymy tylko
+    // na realnie dostępnych danych.
+    const frequencyScore = new Array(currentGame.max + 1).fill(0);
+    const sectorShares = new Array(currentGame.ranges.length).fill(0);
+    let evenShare = 0;
+    let meanNumber = 0;
+    let meanSpread = 0;
+    let totalWeight = 0;
+
+    windowAnalyses.forEach((analysis, idx) => {
+        if (!analysis.windowSize) return;
+
+        const weight = weights[idx];
+        totalWeight += weight;
+
+        for (let n = 1; n <= currentGame.max; n++) {
+            frequencyScore[n] += analysis.frequencies[n] * weight;
+        }
+
+        analysis.sectorShares.forEach((share, sectorIndex) => {
+            sectorShares[sectorIndex] += share * weight;
+        });
+
+        evenShare += analysis.evenShare * weight;
+        meanNumber += analysis.meanNumber * weight;
+        meanSpread += analysis.meanSpread * weight;
+    });
+
+    if (!totalWeight) {
+        return {
+            ok: false,
+            message: "Zaimportowane dane nie zawierają poprawnych liczb."
+        };
+    }
+
+    for (let n = 1; n <= currentGame.max; n++) {
+        frequencyScore[n] /= totalWeight;
+    }
+    for (let i = 0; i < sectorShares.length; i++) {
+        sectorShares[i] /= totalWeight;
+    }
+    evenShare /= totalWeight;
+    meanNumber /= totalWeight;
+    meanSpread /= totalWeight;
+
+    // Migracja: porównujemy starszą i nowszą połowę maks. 15 ostatnich losowań.
+    const migrationSample = draws.slice(-Math.min(15, draws.length));
+    const centers = migrationSample.map(draw => {
+        const nums = (draw.liczby || []).filter(
+            n => Number.isInteger(n) && n >= 1 && n <= currentGame.max
+        );
+        return nums.length ? average(nums) : 0;
+    }).filter(Boolean);
+
+    const half = Math.floor(centers.length / 2);
+    const olderCenter = half ? average(centers.slice(0, half)) : average(centers);
+    const newerCenter = half ? average(centers.slice(half)) : average(centers);
+    const migrationDelta = newerCenter - olderCenter;
+
+    // Mały bonus kierunkowy. Migracja nie dominuje rankingu HOT,
+    // tylko delikatnie rozstrzyga podobne wyniki.
+    const migrationStrength = clamp(Math.abs(migrationDelta) / Math.max(1, currentGame.max * 0.08), 0, 1);
+    const direction = migrationDelta > 0.75 ? 1 : migrationDelta < -0.75 ? -1 : 0;
+
+    const rankedNumbers = [];
+    for (let n = 1; n <= currentGame.max; n++) {
+        const position = ((n - 1) / Math.max(1, currentGame.max - 1)) * 2 - 1;
+        const migrationBonus = direction * position * migrationStrength * 0.08;
+
+        rankedNumbers.push({
+            number: n,
+            score: frequencyScore[n] + migrationBonus
+        });
+    }
+
+    rankedNumbers.sort((a, b) => b.score - a.score || a.number - b.number);
+
+    const hotPoolSize = currentGame === games.multi
+        ? Math.min(10, currentGame.max)
+        : Math.min(5, currentGame.max);
+
+    const coldPoolSize = currentGame === games.multi
+        ? Math.min(10, currentGame.max)
+        : Math.min(5, currentGame.max);
+
+    const hotPool = rankedNumbers.slice(0, hotPoolSize).map(x => x.number);
+    const hotSet = new Set(hotPool);
+
+    const coldPool = [...rankedNumbers]
+        .reverse()
+        .map(x => x.number)
+        .filter(n => !hotSet.has(n))
+        .slice(0, coldPoolSize);
+
+    // Dla Multi: 9 liczb => 5 z TOP10 HOT, 8 => 4, 10 => 5.
+    // Dla mniejszych gier nie robimy z HOT połowy całego kuponu na siłę.
+    const requiredCount = currentGame === games.multi
+        ? Math.min(hotPool.length, Math.ceil(targetCount / 2))
+        : Math.min(hotPool.length, Math.max(1, Math.round(targetCount * 0.4)));
+
+    const structure = apportionCounts(sectorShares, targetCount);
+
+    let wantedEven = clamp(Math.round(evenShare * targetCount), 0, targetCount);
+    let wantedOdd = targetCount - wantedEven;
+
+    const targetSum = Math.round(meanNumber * targetCount);
+    const possibleMin = getMinPossibleSum(targetCount);
+    const possibleMax = getMaxPossibleSum(targetCount, currentGame.max);
+
+    // Zakres celowo jest umiarkowany — Auto Forge ma kierować,
+    // a nie zablokować generator zbyt wąskim pasmem.
+    const baseTolerance = currentGame === games.multi
+        ? Math.max(12, Math.round(targetCount * 2.5))
+        : Math.max(7, Math.round(targetCount * 2));
+
+    const dynamicTolerance = Math.round(meanSpread * targetCount * 0.45);
+    const tolerance = Math.max(baseTolerance, dynamicTolerance);
+
+    const sumMin = clamp(targetSum - tolerance, possibleMin, possibleMax);
+    const sumMax = clamp(targetSum + tolerance, possibleMin, possibleMax);
+
+    // Confidence = spójność 5/10/15, nie "szansa wygranej".
+    const evenValues = windowAnalyses.filter(x => x.windowSize).map(x => x.evenShare);
+    const meanValues = windowAnalyses.filter(x => x.windowSize).map(x => x.meanNumber);
+
+    let sectorDispersion = 0;
+    for (let sector = 0; sector < currentGame.ranges.length; sector++) {
+        const vals = windowAnalyses
+            .filter(x => x.windowSize)
+            .map(x => x.sectorShares[sector]);
+        sectorDispersion += standardDeviation(vals);
+    }
+    sectorDispersion /= Math.max(1, currentGame.ranges.length);
+
+    const evenDispersion = standardDeviation(evenValues);
+    const meanDispersion = standardDeviation(meanValues) / Math.max(1, currentGame.max);
+
+    const confidence = Math.round(clamp(
+        100
+        - sectorDispersion * 180
+        - evenDispersion * 120
+        - meanDispersion * 120,
+        35,
+        95
+    ));
+
+    const migrationText = direction > 0
+        ? `↑ W GÓRĘ (+${migrationDelta.toFixed(1)})`
+        : direction < 0
+            ? `↓ W DÓŁ (${migrationDelta.toFixed(1)})`
+            : `→ STABILNIE (${migrationDelta >= 0 ? "+" : ""}${migrationDelta.toFixed(1)})`;
+
+    return {
+        ok: true,
+        targetCount,
+        windowsUsed: windowAnalyses.map(x => x.windowSize).join(" / "),
+        structure,
+        wantedEven,
+        wantedOdd,
+        sumMin,
+        sumMax,
+        targetSum,
+        hotPool,
+        coldPool,
+        requiredCount,
+        migrationText,
+        confidence,
+        sectorShares
+    };
+}
+
+function applyAutoForgeSettings(analysis) {
+    // Multi Multi najpierw ustala wielkość kuponu.
+    if (currentGame === games.multi) {
+        currentGame.count = analysis.targetCount;
+    }
+
+    const structureFilter = document.getElementById("structureFilter");
+    structureFilter.checked = true;
+
+    analysis.structure.forEach((value, index) => {
+        const input = document.getElementById(`r${index + 1}`);
+        if (input) input.value = value;
+    });
+
+    document.getElementById("evenOddFilter").checked = true;
+    document.getElementById("evenCount").value = analysis.wantedEven;
+    document.getElementById("oddCount").value = analysis.wantedOdd;
+
+    document.getElementById("sumFilter").checked = true;
+    document.getElementById("sumMin").value = analysis.sumMin;
+    document.getElementById("sumMax").value = analysis.sumMax;
+
+    document.getElementById("requiredFilter").checked = true;
+    document.getElementById("requiredNumbers").value = analysis.hotPool.join(",");
+    document.getElementById("requiredCount").value = analysis.requiredCount;
+
+    document.getElementById("excludeFilter").checked = true;
+    document.getElementById("excludedNumbers").value = analysis.coldPool.join(",");
+}
+
+function renderAutoForgeReport(analysis) {
+    const report = document.getElementById("autoForgeReport");
+    if (!report) return;
+
+    const confidenceClass =
+        analysis.confidence >= 75 ? "high" :
+        analysis.confidence >= 55 ? "medium" : "low";
+
+    report.innerHTML = `
+        <div class="auto-forge-card">
+            <div class="auto-forge-title">
+                <strong>🧠 AUTO FORGE — konfiguracja wybrana</strong>
+                <span class="confidence ${confidenceClass}">
+                    Spójność ${analysis.confidence}/100
+                </span>
+            </div>
+
+            <div class="auto-forge-grid">
+                <div><span>Okna</span><strong>5 / 10 / 15 (${analysis.windowsUsed})</strong></div>
+                <div><span>Struktura</span><strong>${analysis.structure.join("-")}</strong></div>
+                <div><span>Parzystość</span><strong>${analysis.wantedEven}/${analysis.wantedOdd}</strong></div>
+                <div><span>Suma</span><strong>${analysis.sumMin}-${analysis.sumMax} (cel ${analysis.targetSum})</strong></div>
+                <div><span>Migracja</span><strong>${analysis.migrationText}</strong></div>
+                <div><span>HOT</span><strong>${analysis.hotPool.join(", ")}</strong></div>
+                <div><span>HOT → losuj</span><strong>${analysis.requiredCount} z ${analysis.hotPool.length}</strong></div>
+                <div><span>COLD → wyklucz</span><strong>${analysis.coldPool.join(", ")}</strong></div>
+            </div>
+
+            <p class="auto-forge-note">
+                Spójność opisuje zgodność krótkich okien analizy, a nie prawdopodobieństwo trafienia.
+            </p>
+        </div>
+    `;
+}
+
+function runAutoForge() {
+    const analysis = buildAutoForgeAnalysis();
+
+    if (!analysis.ok) {
+        alert(`❌ AUTO FORGE\n\n${analysis.message}`);
+        return;
+    }
+
+    applyAutoForgeSettings(analysis);
+    renderAutoForgeReport(analysis);
+
+    // Po ustawieniu wszystkich parametrów używamy istniejącego,
+    // sprawdzonego generatora i jego walidacji.
+    generateMiniLotto();
+}
+
 function validateStructureSettings() {
 
     const structureFilter =
@@ -561,52 +979,46 @@ function validateStructureSettings() {
     }
 
     return true;
-}function generateNumbersByStructure(excludedNumbers = [], excludeFilter = false) {
-
-    const result = [];
+}function generateNumbersByStructure(
+    excludedNumbers = [],
+    excludeFilter = false,
+    requiredNumbers = [],
+    blockedRequiredNumbers = []
+) {
+    const result = [...requiredNumbers];
 
     for (let i = 0; i < currentGame.ranges.length; i++) {
-
-        const start =
-            i === 0
-                ? 1
-                : currentGame.ranges[i - 1] + 1;
-
+        const start = i === 0 ? 1 : currentGame.ranges[i - 1] + 1;
         const end = currentGame.ranges[i];
+        const wanted = Number(document.getElementById(`r${i + 1}`).value);
 
-        const wanted =
-            Number(document.getElementById(`r${i + 1}`).value);
+        const requiredInRange = requiredNumbers.filter(
+            n => n >= start && n <= end
+        ).length;
+        const needed = wanted - requiredInRange;
+
+        if (needed < 0) {
+            return null;
+        }
 
         const pool = [];
-
         for (let n = start; n <= end; n++) {
             if (
-                !excludeFilter ||
-                !excludedNumbers.includes(n)
+                !requiredNumbers.includes(n) &&
+                !blockedRequiredNumbers.includes(n) &&
+                (!excludeFilter || !excludedNumbers.includes(n))
             ) {
                 pool.push(n);
             }
         }
 
-        if (wanted > pool.length) {
-            alert(
-                `❌ Za mało dostępnych liczb w zakresie ${start}-${end}.\n\n` +
-                `Struktura wymaga: ${wanted}\n` +
-                `Dostępnych po wykluczeniach: ${pool.length}`
-            );
-
+        if (needed > pool.length) {
             return null;
         }
 
-        for (let j = 0; j < wanted; j++) {
-
-            const randomIndex =
-                Math.floor(Math.random() * pool.length);
-
-            const selected =
-                pool.splice(randomIndex, 1)[0];
-
-            result.push(selected);
+        for (let j = 0; j < needed; j++) {
+            const randomIndex = Math.floor(Math.random() * pool.length);
+            result.push(pool.splice(randomIndex, 1)[0]);
         }
     }
 
@@ -669,6 +1081,71 @@ function validateSumSettings() {
 
     return true;
 }
+function getRequiredSettings() {
+    const requiredFilter = document.getElementById("requiredFilter")?.checked ?? false;
+
+    if (!requiredFilter) {
+        return { enabled: false, pool: [], count: 0 };
+    }
+
+    const pool = [...new Set(
+        document.getElementById("requiredNumbers").value
+            .split(",")
+            .map(n => Number(n.trim()))
+            .filter(n => Number.isInteger(n) && n >= 1 && n <= currentGame.max)
+    )];
+
+    const count = Number(document.getElementById("requiredCount").value);
+    return { enabled: true, pool, count };
+}
+
+function validateRequiredSettings(excludedNumbers = [], excludeFilter = false) {
+    const settings = getRequiredSettings();
+    if (!settings.enabled) return true;
+
+    if (!Number.isInteger(settings.count) || settings.count < 0) {
+        alert("❌ Wartość 'ile liczb' musi być liczbą całkowitą od 0 wzwyż.");
+        return false;
+    }
+
+    if (settings.count > currentGame.count) {
+        alert(`❌ Kupon ma ${currentGame.count} liczb, a chcesz pobrać ${settings.count} obowiązkowych.`);
+        return false;
+    }
+
+    const availablePool = settings.pool.filter(
+        n => !excludeFilter || !excludedNumbers.includes(n)
+    );
+
+    if (settings.count > availablePool.length) {
+        alert(
+            `❌ Za mała pula liczb obowiązkowych!\n\n` +
+            `Chcesz wylosować: ${settings.count}\n` +
+            `Dostępnych po wykluczeniach: ${availablePool.length}`
+        );
+        return false;
+    }
+
+    return true;
+}
+
+function drawRequiredNumbers(excludedNumbers = [], excludeFilter = false) {
+    const settings = getRequiredSettings();
+    if (!settings.enabled || settings.count === 0) return [];
+
+    const pool = settings.pool.filter(
+        n => !excludeFilter || !excludedNumbers.includes(n)
+    );
+    const selected = [];
+
+    for (let i = 0; i < settings.count; i++) {
+        const randomIndex = Math.floor(Math.random() * pool.length);
+        selected.push(pool.splice(randomIndex, 1)[0]);
+    }
+
+    return selected;
+}
+
 function generateMiniLotto(attempt = 0){
 
     const MAX_ATTEMPTS = 5000;
@@ -699,39 +1176,46 @@ if (!validateSumSettings()) {
 }
 const excludeFilter = document.getElementById("excludeFilter").checked;
 
-const excludedNumbers = document
-    .getElementById("excludedNumbers")
-    .value
-    .split(",")
-    .map(n => Number(n.trim()))
-    .filter(n => !isNaN(n));
-    const structureFilter =
-    document.getElementById("structureFilter").checked;
+const excludedNumbers = [...new Set(
+    document.getElementById("excludedNumbers").value
+        .split(",")
+        .map(n => Number(n.trim()))
+        .filter(n => Number.isInteger(n) && n >= 1 && n <= currentGame.max)
+)];
+
+if (!validateRequiredSettings(excludedNumbers, excludeFilter)) {
+    return;
+}
+
+const requiredNumbers = drawRequiredNumbers(excludedNumbers, excludeFilter);
+const requiredSettings = getRequiredSettings();
+const blockedRequiredNumbers = requiredSettings.enabled
+    ? requiredSettings.pool.filter(n => !requiredNumbers.includes(n))
+    : [];
+const structureFilter = document.getElementById("structureFilter").checked;
 
 if (structureFilter) {
-
     numbers = generateNumbersByStructure(
         excludedNumbers,
-        excludeFilter
+        excludeFilter,
+        requiredNumbers,
+        blockedRequiredNumbers
     );
 
     if (numbers === null) {
+        generateMiniLotto(attempt + 1);
         return;
     }
-
 } else {
+    numbers = [...requiredNumbers];
 
     while (numbers.length < currentGame.count) {
-
-        let n =
-            Math.floor(Math.random() * currentGame.max) + 1;
+        let n = Math.floor(Math.random() * currentGame.max) + 1;
 
         if (
             !numbers.includes(n) &&
-            (
-                !excludeFilter ||
-                !excludedNumbers.includes(n)
-            )
+            !blockedRequiredNumbers.includes(n) &&
+            (!excludeFilter || !excludedNumbers.includes(n))
         ) {
             numbers.push(n);
         }
@@ -1313,8 +1797,9 @@ const maxSredniOdstep =
         : "0.0";
 
 ranking.sort((a, b) => b.trafienia - a.trafienia);
-const hot = ranking.slice(0, 5);
-const cold = [...ranking].reverse().slice(0, 5); 
+const activeHotColdCount = currentGame === games.multi ? hotColdCount : 5;
+const hot = ranking.slice(0, activeHotColdCount);
+const cold = [...ranking].reverse().slice(0, activeHotColdCount); 
     let html = `
 <h2>📊 Statystyki ${currentGame.title}</h2>
 <div style="margin: 15px 0 25px 0;">
@@ -1323,12 +1808,28 @@ const cold = [...ranking].reverse().slice(0, 5);
     </label>
 
     <select id="analysisWindowSelect">
-        <option value="10">10 losowań</option>
-        <option value="20">20 losowań</option>
-        <option value="30">30 losowań</option>
-        <option value="50">50 losowań</option>
-        <option value="100">100 losowań</option>
+    <option value="5">5 losowań</option>
+    <option value="10">10 losowań</option>
+    <option value="20" selected>20 losowań</option>
+    <option value="30">30 losowań</option>
+    <option value="50">50 losowań</option>
+    <option value="100">100 losowań</option>
+    <option value="200">200 losowań</option>
+    <option value="300">300 losowań</option>
+    <option value="500">500 losowań</option>
+</select>
+
+${currentGame === games.multi ? `
+    <br><br>
+    <label for="hotColdCountSelect">
+        Ile HOT / COLD pokazać:
+    </label>
+
+    <select id="hotColdCountSelect">
+        <option value="5">TOP 5</option>
+        <option value="10">TOP 10</option>
     </select>
+` : ""}
 </div>
 <div class="statsSummary">
 <div class="statsBox">
@@ -1469,6 +1970,16 @@ ${hot.map(x => `
 </div>
 `).join("")}
 
+<div class="cold-copy-row">
+    <input
+        type="text"
+        id="hotCopyInput"
+        value="${hot.map(x => x.liczba).join(",")}"
+        readonly
+        aria-label="Liczby HOT do skopiowania">
+    <button type="button" id="copyHotBtn">📋 Kopiuj HOT</button>
+</div>
+
 </div>
 
 <div class="statsBox">
@@ -1480,6 +1991,16 @@ ${cold.map(x => `
     <strong>${x.trafienia}</strong>
 </div>
 `).join("")}
+
+<div class="cold-copy-row">
+    <input
+        type="text"
+        id="coldCopyInput"
+        value="${cold.map(x => x.liczba).join(",")}"
+        readonly
+        aria-label="Liczby COLD do skopiowania">
+    <button type="button" id="copyColdBtn">📋 Kopiuj COLD</button>
+</div>
 
 </div>
 
@@ -1519,5 +2040,57 @@ analysisWindowSelect.addEventListener("change", () => {
 
     pokazStatystyki();
 });
+
+const copyHotBtn = document.getElementById("copyHotBtn");
+const hotCopyInput = document.getElementById("hotCopyInput");
+
+if (copyHotBtn && hotCopyInput) {
+    copyHotBtn.addEventListener("click", async () => {
+        try {
+            await navigator.clipboard.writeText(hotCopyInput.value);
+            const oldText = copyHotBtn.textContent;
+            copyHotBtn.textContent = "✅ Skopiowano";
+            setTimeout(() => {
+                copyHotBtn.textContent = oldText;
+            }, 1200);
+        } catch (error) {
+            hotCopyInput.focus();
+            hotCopyInput.select();
+            document.execCommand("copy");
+        }
+    });
+}
+
+const copyColdBtn = document.getElementById("copyColdBtn");
+const coldCopyInput = document.getElementById("coldCopyInput");
+
+if (copyColdBtn && coldCopyInput) {
+    copyColdBtn.addEventListener("click", async () => {
+        try {
+            await navigator.clipboard.writeText(coldCopyInput.value);
+            const oldText = copyColdBtn.textContent;
+            copyColdBtn.textContent = "✅ Skopiowano";
+            setTimeout(() => {
+                copyColdBtn.textContent = oldText;
+            }, 1200);
+        } catch (error) {
+            coldCopyInput.focus();
+            coldCopyInput.select();
+            document.execCommand("copy");
+        }
+    });
+}
+
+if (currentGame === games.multi) {
+    const hotColdCountSelect =
+        document.getElementById("hotColdCountSelect");
+
+    hotColdCountSelect.value = String(hotColdCount);
+
+    hotColdCountSelect.addEventListener("change", () => {
+        hotColdCount = Number(hotColdCountSelect.value);
+        pokazStatystyki();
+    });
+}
 
 }
