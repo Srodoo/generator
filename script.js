@@ -100,6 +100,83 @@ function getAnalysisDraws() {
     return losowania.slice(-analysisWindow);
 }
 
+function parseDrawDateToTimestamp(dateString) {
+    const match = String(dateString || "").match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+
+    if (!match) return 0;
+
+    const [, day, month, year] = match;
+    return new Date(Number(year), Number(month) - 1, Number(day)).getTime();
+}
+
+function sortDrawsChronologically(draws) {
+    return [...draws].sort((a, b) => {
+        const dateDiff =
+            parseDrawDateToTimestamp(a.data) - parseDrawDateToTimestamp(b.data);
+
+        if (dateDiff !== 0) return dateDiff;
+
+        return Number(a.numer || 0) - Number(b.numer || 0);
+    });
+}
+
+function getLatestImportedDraw() {
+    const draws = getCurrentGameDraws();
+    return draws.length ? draws[draws.length - 1] : null;
+}
+
+function formatLatestDrawNumbers(draw) {
+    if (!draw) return "";
+
+    const main = (draw.liczby || [])
+        .map(number => String(number).padStart(2, "0"))
+        .join(", ");
+
+    const extraParts = [];
+
+    if (Array.isArray(draw.euroNumbers) && draw.euroNumbers.length) {
+        extraParts.push(
+            `Euro: ${draw.euroNumbers.map(number => String(number).padStart(2, "0")).join(", ")}`
+        );
+    }
+
+    if (Number.isInteger(draw.extraNumber)) {
+        extraParts.push(`Extra: ${draw.extraNumber}`);
+    }
+
+    return extraParts.length
+        ? `${main} | ${extraParts.join(" | ")}`
+        : main;
+}
+
+function renderLatestDrawStatus() {
+    const container = document.getElementById("latestDrawStatus");
+    if (!container) return;
+
+    const latest = getLatestImportedDraw();
+
+    if (!latest) {
+        container.innerHTML = `
+            <div class="latest-draw-card empty">
+                <div class="latest-draw-head">📥 Kontrola importu</div>
+                <div class="latest-draw-empty">Brak wczytanych danych dla tej gry.</div>
+            </div>
+        `;
+        return;
+    }
+
+    container.innerHTML = `
+        <div class="latest-draw-card">
+            <div class="latest-draw-head">
+                <span>✅ OSTATNIE WCZYTANE LOSOWANIE</span>
+                <strong>${latest.data}</strong>
+            </div>
+            <div class="latest-draw-meta">Losowanie #${latest.numer}</div>
+            <div class="latest-draw-numbers">${formatLatestDrawNumbers(latest)}</div>
+        </div>
+    `;
+}
+
 function getStructureForNumbers(numbers) {
     
 
@@ -291,14 +368,23 @@ csvFile.addEventListener("change", (e) => {
             }
 
             const gameDraws = getCurrentGameDraws();
+            const sortedDraws = sortDrawsChronologically(parsedDraws);
+
             gameDraws.length = 0;
-            gameDraws.push(...parsedDraws);
+            gameDraws.push(...sortedDraws);
 
             console.log("Zaimportowane losowania:", gameDraws);
 
+            const latestDraw = getLatestImportedDraw();
+            renderLatestDrawStatus();
+
             alert(
                 `✅ Zaimportowano ${gameDraws.length} losowań dla ${currentGame.title}!` +
-                (ignoredRows > 0 ? `\nPominięto wierszy: ${ignoredRows}` : "")
+                (ignoredRows > 0 ? `\nPominięto wierszy: ${ignoredRows}` : "") +
+                (latestDraw
+                    ? `\n\n📅 Ostatnie losowanie: ${latestDraw.data}` +
+                      `\n🔢 ${formatLatestDrawNumbers(latestDraw)}`
+                    : "")
             );
         } catch (error) {
             console.error("Błąd importu:", error);
@@ -334,6 +420,8 @@ const labels = currentGame.ranges.map((value, index) => {
 
     <p>Wygeneruj swój kupon.</p>
 
+    <div id="latestDrawStatus" class="latest-draw-status"></div>
+
 ${currentGame === games.multi ? `
 
 <div class="multi-options">
@@ -360,6 +448,7 @@ ${currentGame === games.multi ? `
 ` : ""}
 
 <div class="auto-forge-controls">
+    <div class="auto-forge-stage-badge">ETAP 4 • ANALIZA + SILNIK WYBORU</div>
     <label for="autoForgeMode">Tryb analizy AUTO FORGE</label>
     <select id="autoForgeMode">
         <option value="auto" selected>AUTO — 5 / 10 / 15</option>
@@ -375,7 +464,7 @@ ${currentGame === games.multi ? `
 </button>
 
 <button id="autoForgeBtn" class="primary-btn auto-forge-btn">
-    🧠 AUTO FORGE
+    🧠 AUTO FORGE — ANALIZUJ
 </button>
 </div>
 
@@ -565,6 +654,7 @@ ${currentGame.ranges.map((value,index)=>{
     });
 }
 
+    renderLatestDrawStatus();
 }
 
 function clamp(value, min, max) {
@@ -629,10 +719,117 @@ function apportionCounts(shares, totalCount) {
     return result;
 }
 
+function getHistoricalDrawCount() {
+    return currentGame === games.multi ? 20 : currentGame.count;
+}
+
+function getSectorBounds(index) {
+    const start = index === 0 ? 1 : currentGame.ranges[index - 1] + 1;
+    const end = currentGame.ranges[index];
+    return { start, end, capacity: end - start + 1 };
+}
+
+function getSectorLabel(index) {
+    const { start, end } = getSectorBounds(index);
+    return `${start}-${end}`;
+}
+
+function getAutoForgeBands() {
+    if (currentGame === games.multi) {
+        return [
+            { key: "LOW", label: "LOW", start: 1, end: 30 },
+            { key: "MID", label: "MID", start: 31, end: 50 },
+            { key: "HIGH", label: "HIGH", start: 51, end: 80 }
+        ];
+    }
+
+    const lowEnd = Math.floor(currentGame.max / 3);
+    const midEnd = Math.floor((currentGame.max * 2) / 3);
+
+    return [
+        { key: "LOW", label: "LOW", start: 1, end: lowEnd },
+        { key: "MID", label: "MID", start: lowEnd + 1, end: midEnd },
+        { key: "HIGH", label: "HIGH", start: midEnd + 1, end: currentGame.max }
+    ];
+}
+
+function getBandIndex(number) {
+    const bands = getAutoForgeBands();
+    const index = bands.findIndex(band => number >= band.start && number <= band.end);
+    return index >= 0 ? index : bands.length - 1;
+}
+
+function getClusterThresholds() {
+    if (currentGame === games.multi) {
+        return { cluster: 3, strong: 4 };
+    }
+
+    return { cluster: 2, strong: 3 };
+}
+
+function apportionScoreCounts(scores, totalCount, capacities = []) {
+    const safeScores = scores.map(score => Math.max(0, Number(score) || 0));
+    const scoreSum = safeScores.reduce((a, b) => a + b, 0);
+    const result = new Array(scores.length).fill(0);
+
+    if (totalCount <= 0 || !scores.length) return result;
+
+    const normalized = scoreSum > 0
+        ? safeScores.map(score => score / scoreSum)
+        : safeScores.map(() => 1 / safeScores.length);
+
+    const raw = normalized.map(share => share * totalCount);
+
+    raw.forEach((value, index) => {
+        const capacity = capacities[index] ?? Infinity;
+        result[index] = Math.min(Math.floor(value), capacity);
+    });
+
+    let remaining = totalCount - result.reduce((a, b) => a + b, 0);
+    const order = raw
+        .map((value, index) => ({
+            index,
+            remainder: value - Math.floor(value),
+            score: safeScores[index]
+        }))
+        .sort((a, b) => b.remainder - a.remainder || b.score - a.score);
+
+    let guard = 0;
+    while (remaining > 0 && guard < 2000) {
+        let placed = false;
+
+        for (const item of order) {
+            const capacity = capacities[item.index] ?? Infinity;
+            if (result[item.index] < capacity) {
+                result[item.index]++;
+                remaining--;
+                placed = true;
+                if (remaining <= 0) break;
+            }
+        }
+
+        if (!placed) break;
+        guard++;
+    }
+
+    return result;
+}
+
 function analyzeAutoForgeWindow(draws, windowSize) {
     const sample = draws.slice(-Math.min(windowSize, draws.length));
+    const sectorCount = currentGame.ranges.length;
+    const bands = getAutoForgeBands();
+    const thresholds = getClusterThresholds();
+
     const numberHits = new Array(currentGame.max + 1).fill(0);
-    const sectorHits = new Array(currentGame.ranges.length).fill(0);
+    const sectorHits = new Array(sectorCount).fill(0);
+    const sectorEvenHits = new Array(sectorCount).fill(0);
+    const sectorClusterDraws = new Array(sectorCount).fill(0);
+    const sectorStrongClusterDraws = new Array(sectorCount).fill(0);
+    const sectorMax = new Array(sectorCount).fill(0);
+
+    const bandHits = new Array(bands.length).fill(0);
+    const bandEvenHits = new Array(bands.length).fill(0);
 
     let totalNumbers = 0;
     let evenNumbers = 0;
@@ -645,11 +842,29 @@ function analyzeAutoForgeWindow(draws, windowSize) {
 
         if (!validNumbers.length) return;
 
+        const drawSectorCounts = new Array(sectorCount).fill(0);
+
         validNumbers.forEach(number => {
+            const sectorIndex = getSectorIndex(number);
+            const bandIndex = getBandIndex(number);
+
             numberHits[number]++;
-            sectorHits[getSectorIndex(number)]++;
+            sectorHits[sectorIndex]++;
+            drawSectorCounts[sectorIndex]++;
+            bandHits[bandIndex]++;
             totalNumbers++;
-            if (number % 2 === 0) evenNumbers++;
+
+            if (number % 2 === 0) {
+                evenNumbers++;
+                sectorEvenHits[sectorIndex]++;
+                bandEvenHits[bandIndex]++;
+            }
+        });
+
+        drawSectorCounts.forEach((count, index) => {
+            sectorMax[index] = Math.max(sectorMax[index], count);
+            if (count >= thresholds.cluster) sectorClusterDraws[index]++;
+            if (count >= thresholds.strong) sectorStrongClusterDraws[index]++;
         });
 
         drawMeans.push(
@@ -666,10 +881,46 @@ function analyzeAutoForgeWindow(draws, windowSize) {
         hits => totalNumbers ? hits / totalNumbers : 0
     );
 
+    const sectorAverageCounts = sectorHits.map(
+        hits => sample.length ? hits / sample.length : 0
+    );
+
+    const sectorClusterRates = sectorClusterDraws.map(
+        hits => sample.length ? hits / sample.length : 0
+    );
+
+    const sectorStrongClusterRates = sectorStrongClusterDraws.map(
+        hits => sample.length ? hits / sample.length : 0
+    );
+
+    const sectorEvenShares = sectorHits.map((hits, index) =>
+        hits ? sectorEvenHits[index] / hits : 0.5
+    );
+
+    const bandShares = bandHits.map(
+        hits => totalNumbers ? hits / totalNumbers : 0
+    );
+
+    const bandAverageCounts = bandHits.map(
+        hits => sample.length ? hits / sample.length : 0
+    );
+
+    const bandEvenShares = bandHits.map((hits, index) =>
+        hits ? bandEvenHits[index] / hits : 0.5
+    );
+
     return {
         windowSize: sample.length,
         frequencies,
         sectorShares,
+        sectorAverageCounts,
+        sectorClusterRates,
+        sectorStrongClusterRates,
+        sectorMax,
+        sectorEvenShares,
+        bandShares,
+        bandAverageCounts,
+        bandEvenShares,
         evenShare: totalNumbers ? evenNumbers / totalNumbers : 0.5,
         meanNumber: drawMeans.length ? average(drawMeans) : (currentGame.max + 1) / 2,
         meanSpread: standardDeviation(drawMeans)
@@ -692,46 +943,205 @@ function getAutoForgeWindowConfig() {
     };
 }
 
-function buildSecondaryRanking(draws, requestedWindows, weights, max, extractor) {
-    const scores = new Array(max + 1).fill(0);
+
+function getValidDrawNumbers(draw) {
+    return [...new Set((draw?.liczby || []).filter(
+        n => Number.isInteger(n) && n >= 1 && n <= currentGame.max
+    ))].sort((a, b) => a - b);
+}
+
+function getCombinationKey(numbers) {
+    return [...numbers].sort((a, b) => a - b).join("|");
+}
+
+function forEachCombination(numbers, size, callback) {
+    if (!Array.isArray(numbers) || size <= 0 || numbers.length < size) return;
+
+    const picked = [];
+    function walk(start) {
+        if (picked.length === size) {
+            callback(picked);
+            return;
+        }
+
+        const missing = size - picked.length;
+        for (let i = start; i <= numbers.length - missing; i++) {
+            picked.push(numbers[i]);
+            walk(i + 1);
+            picked.pop();
+        }
+    }
+
+    walk(0);
+}
+
+function addMapScore(map, key, value) {
+    map.set(key, (map.get(key) || 0) + value);
+}
+
+function getMaxMapValue(map) {
+    let maxValue = 0;
+    map.forEach(value => {
+        if (value > maxValue) maxValue = value;
+    });
+    return maxValue;
+}
+
+function normalizeVector01(values) {
+    const maxValue = Math.max(...values.slice(1), 0);
+    if (maxValue <= 0) return values.map(() => 0);
+    return values.map((value, index) => index === 0 ? 0 : value / maxValue);
+}
+
+function buildAutoForgePatternModel(draws, requestedWindows, weights) {
+    const max = currentGame.max;
+    const returnScores = new Array(max + 1).fill(0);
+    const pairScores = new Map();
+    const tripleScores = new Map();
+    const quadScores = new Map();
+
+    let weightedAverageReturns = 0;
     let totalWeight = 0;
 
     requestedWindows.forEach((windowSize, index) => {
-        const sample = draws.slice(-Math.min(windowSize, draws.length));
+        const sample = draws
+            .slice(-Math.min(windowSize, draws.length))
+            .map(draw => getValidDrawNumbers(draw))
+            .filter(numbers => numbers.length > 0);
+
         if (!sample.length) return;
 
-        const counts = new Array(max + 1).fill(0);
-        sample.forEach(draw => {
-            extractor(draw)
-                .filter(n => Number.isInteger(n) && n >= 1 && n <= max)
-                .forEach(n => counts[n]++);
+        const weight = weights[index] ?? 0;
+        totalWeight += weight;
+
+        const opportunities = new Array(max + 1).fill(0);
+        const returned = new Array(max + 1).fill(0);
+        let overlapTotal = 0;
+        let transitionCount = 0;
+
+        for (let i = 0; i < sample.length - 1; i++) {
+            const previous = sample[i];
+            const nextSet = new Set(sample[i + 1]);
+            let overlap = 0;
+
+            previous.forEach(number => {
+                opportunities[number]++;
+                if (nextSet.has(number)) {
+                    returned[number]++;
+                    overlap++;
+                }
+            });
+
+            overlapTotal += overlap;
+            transitionCount++;
+        }
+
+        for (let n = 1; n <= max; n++) {
+            const rate = opportunities[n] ? returned[n] / opportunities[n] : 0;
+            returnScores[n] += rate * weight;
+        }
+
+        const averageReturns = transitionCount ? overlapTotal / transitionCount : 0;
+        weightedAverageReturns += averageReturns * weight;
+
+        const localPairs = new Map();
+        const localTriples = new Map();
+        const localQuads = new Map();
+
+        sample.forEach(numbers => {
+            forEachCombination(numbers, 2, combo => {
+                const key = getCombinationKey(combo);
+                localPairs.set(key, (localPairs.get(key) || 0) + 1);
+            });
+
+            forEachCombination(numbers, 3, combo => {
+                const key = getCombinationKey(combo);
+                localTriples.set(key, (localTriples.get(key) || 0) + 1);
+            });
+
+            // Czwórki są sygnałem pomocniczym. Przy Multi (20 kul) nadal liczymy
+            // tylko na krótkich oknach 5/10/15, więc koszt pozostaje kontrolowany.
+            forEachCombination(numbers, 4, combo => {
+                const key = getCombinationKey(combo);
+                localQuads.set(key, (localQuads.get(key) || 0) + 1);
+            });
         });
 
-        const weight = weights[index];
-        totalWeight += weight;
-        for (let n = 1; n <= max; n++) {
-            scores[n] += (counts[n] / sample.length) * weight;
-        }
+        const denominator = Math.max(1, sample.length);
+        localPairs.forEach((count, key) => addMapScore(pairScores, key, (count / denominator) * weight));
+        localTriples.forEach((count, key) => addMapScore(tripleScores, key, (count / denominator) * weight));
+        localQuads.forEach((count, key) => addMapScore(quadScores, key, (count / denominator) * weight));
     });
 
-    if (!totalWeight) return [];
-
-    return scores
-        .map((score, number) => ({ number, score: score / totalWeight }))
-        .filter(item => item.number > 0)
-        .sort((a, b) => b.score - a.score || a.number - b.number);
-}
-
-function drawFromPool(pool, count, excluded = []) {
-    const available = pool.filter(n => !excluded.includes(n));
-    const selected = [];
-
-    while (selected.length < count && available.length) {
-        const index = Math.floor(Math.random() * available.length);
-        selected.push(available.splice(index, 1)[0]);
+    if (totalWeight > 0) {
+        for (let n = 1; n <= max; n++) returnScores[n] /= totalWeight;
+        weightedAverageReturns /= totalWeight;
+        [pairScores, tripleScores, quadScores].forEach(map => {
+            map.forEach((value, key) => map.set(key, value / totalWeight));
+        });
     }
 
-    return selected.sort((a, b) => a - b);
+    const pairCentralityRaw = new Array(max + 1).fill(0);
+    const tripleCentralityRaw = new Array(max + 1).fill(0);
+    const quadCentralityRaw = new Array(max + 1).fill(0);
+
+    pairScores.forEach((score, key) => {
+        key.split("|").map(Number).forEach(n => pairCentralityRaw[n] += score);
+    });
+    tripleScores.forEach((score, key) => {
+        key.split("|").map(Number).forEach(n => tripleCentralityRaw[n] += score);
+    });
+    quadScores.forEach((score, key) => {
+        key.split("|").map(Number).forEach(n => quadCentralityRaw[n] += score);
+    });
+
+    return {
+        latestNumbers: draws.length ? getValidDrawNumbers(draws[draws.length - 1]) : [],
+        returnScores,
+        averageReturnCount: weightedAverageReturns,
+        pairScores,
+        tripleScores,
+        quadScores,
+        pairCentrality: normalizeVector01(pairCentralityRaw),
+        tripleCentrality: normalizeVector01(tripleCentralityRaw),
+        quadCentrality: normalizeVector01(quadCentralityRaw),
+        maxPairScore: getMaxMapValue(pairScores),
+        maxTripleScore: getMaxMapValue(tripleScores),
+        maxQuadScore: getMaxMapValue(quadScores)
+    };
+}
+
+function getTopPatternEntries(scoreMap, allowedNumbers = null, limit = 5, structure = null) {
+    const allowedSet = allowedNumbers instanceof Set ? allowedNumbers : null;
+
+    return [...scoreMap.entries()]
+        .map(([key, score]) => ({
+            numbers: key.split("|").map(Number),
+            score
+        }))
+        .filter(item => {
+            if (allowedSet && !item.numbers.every(number => allowedSet.has(number))) {
+                return false;
+            }
+
+            if (Array.isArray(structure)) {
+                const used = new Array(structure.length).fill(0);
+                for (const number of item.numbers) {
+                    const sector = getSectorIndex(number);
+                    used[sector]++;
+                    if (used[sector] > (structure[sector] || 0)) return false;
+                }
+            }
+
+            return true;
+        })
+        .sort((a, b) => b.score - a.score || a.numbers.join("-").localeCompare(b.numbers.join("-")))
+        .slice(0, limit);
+}
+
+function getPatternScore(scoreMap, numbers) {
+    if (!scoreMap || !numbers?.length) return 0;
+    return scoreMap.get(getCombinationKey(numbers)) || 0;
 }
 
 function buildAutoForgeAnalysis() {
@@ -748,18 +1158,24 @@ function buildAutoForgeAnalysis() {
     const windowConfig = getAutoForgeWindowConfig();
     const requestedWindows = windowConfig.requestedWindows;
     const weights = windowConfig.weights;
+    const windowAnalyses = requestedWindows.map(size => analyzeAutoForgeWindow(draws, size));
+    const sectorCount = currentGame.ranges.length;
+    const bands = getAutoForgeBands();
+    const thresholds = getClusterThresholds();
 
-    const windowAnalyses = requestedWindows.map(
-        size => analyzeAutoForgeWindow(draws, size)
-    );
-
-    // Jeżeli mamy mniej niż 15 losowań, nadal działamy, ale liczymy tylko
-    // na realnie dostępnych danych.
     const frequencyScore = new Array(currentGame.max + 1).fill(0);
-    const sectorShares = new Array(currentGame.ranges.length).fill(0);
-    let evenShare = 0;
+    const sectorShares = new Array(sectorCount).fill(0);
+    const sectorAverageCounts = new Array(sectorCount).fill(0);
+    const sectorClusterRates = new Array(sectorCount).fill(0);
+    const sectorStrongClusterRates = new Array(sectorCount).fill(0);
+    const sectorEvenShares = new Array(sectorCount).fill(0);
+    const sectorMax = new Array(sectorCount).fill(0);
+
+    const bandShares = new Array(bands.length).fill(0);
+    const bandAverageCounts = new Array(bands.length).fill(0);
+    const bandEvenShares = new Array(bands.length).fill(0);
+
     let meanNumber = 0;
-    let meanSpread = 0;
     let totalWeight = 0;
 
     windowAnalyses.forEach((analysis, idx) => {
@@ -772,13 +1188,22 @@ function buildAutoForgeAnalysis() {
             frequencyScore[n] += analysis.frequencies[n] * weight;
         }
 
-        analysis.sectorShares.forEach((share, sectorIndex) => {
-            sectorShares[sectorIndex] += share * weight;
-        });
+        for (let i = 0; i < sectorCount; i++) {
+            sectorShares[i] += analysis.sectorShares[i] * weight;
+            sectorAverageCounts[i] += analysis.sectorAverageCounts[i] * weight;
+            sectorClusterRates[i] += analysis.sectorClusterRates[i] * weight;
+            sectorStrongClusterRates[i] += analysis.sectorStrongClusterRates[i] * weight;
+            sectorEvenShares[i] += analysis.sectorEvenShares[i] * weight;
+            sectorMax[i] = Math.max(sectorMax[i], analysis.sectorMax[i]);
+        }
 
-        evenShare += analysis.evenShare * weight;
+        for (let i = 0; i < bands.length; i++) {
+            bandShares[i] += analysis.bandShares[i] * weight;
+            bandAverageCounts[i] += analysis.bandAverageCounts[i] * weight;
+            bandEvenShares[i] += analysis.bandEvenShares[i] * weight;
+        }
+
         meanNumber += analysis.meanNumber * weight;
-        meanSpread += analysis.meanSpread * weight;
     });
 
     if (!totalWeight) {
@@ -791,14 +1216,24 @@ function buildAutoForgeAnalysis() {
     for (let n = 1; n <= currentGame.max; n++) {
         frequencyScore[n] /= totalWeight;
     }
-    for (let i = 0; i < sectorShares.length; i++) {
-        sectorShares[i] /= totalWeight;
-    }
-    evenShare /= totalWeight;
-    meanNumber /= totalWeight;
-    meanSpread /= totalWeight;
 
-    // Migracja: porównujemy starszą i nowszą połowę maks. 15 ostatnich losowań.
+    for (let i = 0; i < sectorCount; i++) {
+        sectorShares[i] /= totalWeight;
+        sectorAverageCounts[i] /= totalWeight;
+        sectorClusterRates[i] /= totalWeight;
+        sectorStrongClusterRates[i] /= totalWeight;
+        sectorEvenShares[i] /= totalWeight;
+    }
+
+    for (let i = 0; i < bands.length; i++) {
+        bandShares[i] /= totalWeight;
+        bandAverageCounts[i] /= totalWeight;
+        bandEvenShares[i] /= totalWeight;
+    }
+
+    meanNumber /= totalWeight;
+
+    // Migracja: porównanie środka planszy w starszej i nowszej części maks. 15 losowań.
     const migrationSample = draws.slice(-Math.min(15, draws.length));
     const centers = migrationSample.map(draw => {
         const nums = (draw.liczby || []).filter(
@@ -811,93 +1246,13 @@ function buildAutoForgeAnalysis() {
     const olderCenter = half ? average(centers.slice(0, half)) : average(centers);
     const newerCenter = half ? average(centers.slice(half)) : average(centers);
     const migrationDelta = newerCenter - olderCenter;
-
-    // Mały bonus kierunkowy. Migracja nie dominuje rankingu HOT,
-    // tylko delikatnie rozstrzyga podobne wyniki.
-    const migrationStrength = clamp(Math.abs(migrationDelta) / Math.max(1, currentGame.max * 0.08), 0, 1);
-    const direction = migrationDelta > 0.75 ? 1 : migrationDelta < -0.75 ? -1 : 0;
-
-    const rankedNumbers = [];
-    for (let n = 1; n <= currentGame.max; n++) {
-        const position = ((n - 1) / Math.max(1, currentGame.max - 1)) * 2 - 1;
-        const migrationBonus = direction * position * migrationStrength * 0.08;
-
-        rankedNumbers.push({
-            number: n,
-            score: frequencyScore[n] + migrationBonus
-        });
-    }
-
-    rankedNumbers.sort((a, b) => b.score - a.score || a.number - b.number);
-
-    const hotPoolSize = currentGame === games.multi
-        ? Math.min(10, currentGame.max)
-        : Math.min(5, currentGame.max);
-
-    const coldPoolSize = currentGame === games.multi
-        ? Math.min(10, currentGame.max)
-        : Math.min(5, currentGame.max);
-
-    const hotPool = rankedNumbers.slice(0, hotPoolSize).map(x => x.number);
-    const hotSet = new Set(hotPool);
-
-    const coldPool = [...rankedNumbers]
-        .reverse()
-        .map(x => x.number)
-        .filter(n => !hotSet.has(n))
-        .slice(0, coldPoolSize);
-
-    // Dla Multi: 9 liczb => 5 z TOP10 HOT, 8 => 4, 10 => 5.
-    // Dla mniejszych gier nie robimy z HOT połowy całego kuponu na siłę.
-    const requiredCount = currentGame === games.multi
-        ? Math.min(hotPool.length, Math.ceil(targetCount / 2))
-        : Math.min(hotPool.length, Math.max(1, Math.round(targetCount * 0.4)));
-
-    const structure = apportionCounts(sectorShares, targetCount);
-
-    let wantedEven = clamp(Math.round(evenShare * targetCount), 0, targetCount);
-    let wantedOdd = targetCount - wantedEven;
-
-    const targetSum = Math.round(meanNumber * targetCount);
-    const possibleMin = getMinPossibleSum(targetCount);
-    const possibleMax = getMaxPossibleSum(targetCount, currentGame.max);
-
-    // Zakres celowo jest umiarkowany — Auto Forge ma kierować,
-    // a nie zablokować generator zbyt wąskim pasmem.
-    const baseTolerance = currentGame === games.multi
-        ? Math.max(12, Math.round(targetCount * 2.5))
-        : Math.max(7, Math.round(targetCount * 2));
-
-    const dynamicTolerance = Math.round(meanSpread * targetCount * 0.45);
-    const tolerance = Math.max(baseTolerance, dynamicTolerance);
-
-    const sumMin = clamp(targetSum - tolerance, possibleMin, possibleMax);
-    const sumMax = clamp(targetSum + tolerance, possibleMin, possibleMax);
-
-    // Confidence = spójność 5/10/15, nie "szansa wygranej".
-    const evenValues = windowAnalyses.filter(x => x.windowSize).map(x => x.evenShare);
-    const meanValues = windowAnalyses.filter(x => x.windowSize).map(x => x.meanNumber);
-
-    let sectorDispersion = 0;
-    for (let sector = 0; sector < currentGame.ranges.length; sector++) {
-        const vals = windowAnalyses
-            .filter(x => x.windowSize)
-            .map(x => x.sectorShares[sector]);
-        sectorDispersion += standardDeviation(vals);
-    }
-    sectorDispersion /= Math.max(1, currentGame.ranges.length);
-
-    const evenDispersion = standardDeviation(evenValues);
-    const meanDispersion = standardDeviation(meanValues) / Math.max(1, currentGame.max);
-
-    const confidence = Math.round(clamp(
-        100
-        - sectorDispersion * 180
-        - evenDispersion * 120
-        - meanDispersion * 120,
-        35,
-        95
-    ));
+    const migrationThreshold = Math.max(0.6, currentGame.max * 0.01);
+    const direction = migrationDelta > migrationThreshold ? 1 : migrationDelta < -migrationThreshold ? -1 : 0;
+    const migrationStrength = clamp(
+        Math.abs(migrationDelta) / Math.max(1, currentGame.max * 0.06),
+        0,
+        1
+    );
 
     const migrationText = direction > 0
         ? `↑ W GÓRĘ (+${migrationDelta.toFixed(1)})`
@@ -905,75 +1260,907 @@ function buildAutoForgeAnalysis() {
             ? `↓ W DÓŁ (${migrationDelta.toFixed(1)})`
             : `→ STABILNIE (${migrationDelta >= 0 ? "+" : ""}${migrationDelta.toFixed(1)})`;
 
-    let secondary = null;
+    // Strefy LOW / MID / HIGH — mierzymy nie tylko udział, ale też intensywność
+    // względem szerokości danej strefy.
+    const bandStats = bands.map((band, index) => {
+        const capacity = band.end - band.start + 1;
+        const capacityShare = capacity / currentGame.max;
+        const share = bandShares[index];
+        const intensity = capacityShare > 0 ? share / capacityShare : 0;
 
-    if (currentGame === games.euro) {
-        const ranking = buildSecondaryRanking(
-            draws, requestedWindows, weights, currentGame.euroMax,
-            draw => draw.euroNumbers || []
-        );
-        const pool = ranking.slice(0, Math.min(5, ranking.length)).map(item => item.number);
-        secondary = { type: "euro", pool, count: currentGame.euroCount };
+        return {
+            ...band,
+            share,
+            averageCount: bandAverageCounts[index],
+            evenShare: bandEvenShares[index],
+            capacityShare,
+            intensity
+        };
+    });
+
+    const bandRanking = [...bandStats].sort(
+        (a, b) => b.intensity - a.intensity || b.share - a.share
+    );
+    const dominantBand = bandRanking[0];
+    const secondBand = bandRanking[1] || dominantBand;
+
+    let focusKeys;
+    if (direction > 0) {
+        focusKeys = ["MID", "HIGH"];
+    } else if (direction < 0) {
+        focusKeys = ["LOW", "MID"];
+    } else if (dominantBand.key === "HIGH") {
+        focusKeys = ["MID", "HIGH"];
+    } else if (dominantBand.key === "LOW") {
+        focusKeys = ["LOW", "MID"];
+    } else {
+        const low = bandStats.find(x => x.key === "LOW");
+        const high = bandStats.find(x => x.key === "HIGH");
+        focusKeys = (high?.intensity || 0) >= (low?.intensity || 0)
+            ? ["MID", "HIGH"]
+            : ["LOW", "MID"];
     }
 
-    if (currentGame === games.extra) {
-        const ranking = buildSecondaryRanking(
-            draws, requestedWindows, weights, currentGame.extraMax,
-            draw => Number.isInteger(draw.extraNumber) ? [draw.extraNumber] : []
+    const focusBands = bandStats.filter(band => focusKeys.includes(band.key));
+    const focusRawShare = focusBands.reduce((sum, band) => sum + band.share, 0);
+    const focusCapacityShare = focusBands.reduce((sum, band) => sum + band.capacityShare, 0);
+    const focusIntensity = focusCapacityShare ? focusRawShare / focusCapacityShare : 1;
+
+    const dominanceSignal = clamp(
+        (dominantBand.intensity - secondBand.intensity) / 0.75,
+        0,
+        1
+    );
+
+    const topClusterRates = [...sectorClusterRates].sort((a, b) => b - a).slice(0, 2);
+    const clusterSignal = topClusterRates.length ? average(topClusterRates) : 0;
+    const focusSignal = clamp((focusIntensity - 1) / 0.45, 0, 1);
+
+    const signalStrength = clamp(
+        dominanceSignal * 0.30 +
+        migrationStrength * 0.25 +
+        clusterSignal * 0.25 +
+        focusSignal * 0.20,
+        0,
+        1
+    );
+
+    let focusPercent = Math.round((focusRawShare * 100) + signalStrength * 15);
+    focusPercent = clamp(focusPercent, 55, 85);
+
+    const focusTargetCount = clamp(
+        Math.round(targetCount * focusPercent / 100),
+        Math.min(targetCount, 1),
+        targetCount
+    );
+    const outsideTargetCount = targetCount - focusTargetCount;
+
+    // Punktacja sektorów: obsada + regularność skupisk + silne skupiska + migracja.
+    const sectorScores = sectorAverageCounts.map((avgCount, index) => {
+        const bounds = getSectorBounds(index);
+        const midpoint = (bounds.start + bounds.end) / 2;
+        const position = ((midpoint - 1) / Math.max(1, currentGame.max - 1)) * 2 - 1;
+        const migrationFactor = Math.max(
+            0.55,
+            1 + direction * position * migrationStrength * 0.38
         );
-        const pool = ranking.slice(0, Math.min(2, ranking.length)).map(item => item.number);
-        secondary = { type: "extra", pool, count: currentGame.extraCount };
+        const clusterFactor =
+            1 + sectorClusterRates[index] * 0.75 + sectorStrongClusterRates[index] * 0.90;
+
+        return Math.max(0.001, avgCount) * clusterFactor * migrationFactor;
+    });
+
+    const focusSectorIndices = sectorScores
+        .map((score, index) => ({ score, index, band: getBandIndex((getSectorBounds(index).start + getSectorBounds(index).end) / 2) }))
+        .filter(item => focusKeys.includes(bands[item.band].key))
+        .sort((a, b) => b.score - a.score);
+
+    const outsideSectorIndices = sectorScores
+        .map((score, index) => ({ score, index, band: getBandIndex((getSectorBounds(index).start + getSectorBounds(index).end) / 2) }))
+        .filter(item => !focusKeys.includes(bands[item.band].key))
+        .sort((a, b) => b.score - a.score);
+
+    const focusLimit = currentGame === games.multi
+        ? (signalStrength >= 0.68 ? 3 : signalStrength >= 0.42 ? 4 : 5)
+        : (signalStrength >= 0.55 ? 2 : 3);
+
+    const outsideLimit = currentGame === games.multi ? 2 : 1;
+    const selectedFocus = focusSectorIndices.slice(0, Math.min(focusLimit, focusSectorIndices.length));
+    const selectedOutside = outsideSectorIndices.slice(0, Math.min(outsideLimit, outsideSectorIndices.length));
+
+    const structure = new Array(sectorCount).fill(0);
+    const capacities = currentGame.ranges.map((_, index) => getSectorBounds(index).capacity);
+    const power = currentGame === games.multi
+        ? 1.65 + signalStrength * 0.85
+        : 1.40 + signalStrength * 0.55;
+
+    if (focusTargetCount > 0 && selectedFocus.length) {
+        const scores = selectedFocus.map(item => sectorScores[item.index] ** power);
+        const caps = selectedFocus.map(item => capacities[item.index]);
+        const allocated = apportionScoreCounts(scores, focusTargetCount, caps);
+        selectedFocus.forEach((item, idx) => {
+            structure[item.index] += allocated[idx];
+        });
     }
+
+    if (outsideTargetCount > 0 && selectedOutside.length) {
+        const scores = selectedOutside.map(item => sectorScores[item.index] ** power);
+        const caps = selectedOutside.map(item => capacities[item.index]);
+        const allocated = apportionScoreCounts(scores, outsideTargetCount, caps);
+        selectedOutside.forEach((item, idx) => {
+            structure[item.index] += allocated[idx];
+        });
+    }
+
+    // Awaryjnie domykamy strukturę, gdyby wybrana grupa nie miała wystarczającej pojemności.
+    let structureTotal = structure.reduce((a, b) => a + b, 0);
+    if (structureTotal < targetCount) {
+        const fallback = sectorScores
+            .map((score, index) => ({ score, index }))
+            .sort((a, b) => b.score - a.score);
+
+        for (const item of fallback) {
+            while (structureTotal < targetCount && structure[item.index] < capacities[item.index]) {
+                structure[item.index]++;
+                structureTotal++;
+            }
+            if (structureTotal >= targetCount) break;
+        }
+    }
+
+    const activeSectors = sectorScores
+        .map((score, index) => ({
+            index,
+            label: getSectorLabel(index),
+            score,
+            averageCount: sectorAverageCounts[index],
+            clusterRate: sectorClusterRates[index],
+            strongClusterRate: sectorStrongClusterRates[index],
+            maxCluster: sectorMax[index],
+            evenShare: sectorEvenShares[index],
+            suggested: structure[index]
+        }))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, currentGame === games.multi ? 5 : 3);
+
+    const focusSectorSet = new Set(
+        currentGame.ranges
+            .map((_, index) => index)
+            .filter(index => {
+                const bounds = getSectorBounds(index);
+                const midpoint = (bounds.start + bounds.end) / 2;
+                return focusKeys.includes(bands[getBandIndex(midpoint)].key);
+            })
+    );
+
+    let focusEvenWeighted = 0;
+    let focusWeight = 0;
+    focusSectorSet.forEach(index => {
+        const weight = sectorAverageCounts[index];
+        focusEvenWeighted += sectorEvenShares[index] * weight;
+        focusWeight += weight;
+    });
+    const focusEvenShare = focusWeight ? focusEvenWeighted / focusWeight : 0.5;
+    const suggestedEven = clamp(Math.round(focusEvenShare * targetCount), 0, targetCount);
+    const suggestedOdd = targetCount - suggestedEven;
+
+    // ETAP 4: relacje między liczbami. Najpierw budujemy niezależny model
+    // powrotów oraz współwystępowania par / trójek / czwórek na tych samych
+    // ważonych oknach 5/10/15.
+    const patternModel = buildAutoForgePatternModel(
+        draws,
+        requestedWindows,
+        weights
+    );
+
+    // HOT / COLD pozostają czystą klasyfikacją trendu częstotliwościowego.
+    // To ważne: etykieta HOT nie może oznaczać "wszystkiego, co wysoko punktowane".
+    const trendRankedNumbers = [];
+    for (let n = 1; n <= currentGame.max; n++) {
+        const position = ((n - 1) / Math.max(1, currentGame.max - 1)) * 2 - 1;
+        const migrationBonus = direction * position * migrationStrength * 0.06;
+        trendRankedNumbers.push({
+            number: n,
+            score: frequencyScore[n] + migrationBonus
+        });
+    }
+    trendRankedNumbers.sort((a, b) => b.score - a.score || a.number - b.number);
+
+    const hotPoolSize = currentGame === games.multi ? 10 : 5;
+    const coldPoolSize = currentGame === games.multi ? 10 : 5;
+    const hotPool = trendRankedNumbers
+        .slice(0, Math.min(hotPoolSize, trendRankedNumbers.length))
+        .map(x => x.number);
+    const hotSet = new Set(hotPool);
+    const coldPool = [...trendRankedNumbers]
+        .reverse()
+        .map(x => x.number)
+        .filter(n => !hotSet.has(n))
+        .slice(0, Math.min(coldPoolSize, trendRankedNumbers.length));
+    const coldSet = new Set(coldPool);
+
+    // AUTO SCORE konkretnej liczby. Geografia planszy ma najwyższy priorytet,
+    // potem HOT/MID/COLD, powroty i relacje. Losowość zostaje dopiero na końcu.
+    const maxSectorScore = Math.max(...sectorScores, 0.0001);
+    const maxFrequency = Math.max(...frequencyScore.slice(1), 0.0001);
+    const latestSet = new Set(patternModel.latestNumbers);
+    const numberScores = new Array(currentGame.max + 1).fill(0);
+    const numberComponents = new Array(currentGame.max + 1).fill(null);
+    const rankedNumbers = [];
+
+    for (let n = 1; n <= currentGame.max; n++) {
+        const sector = getSectorIndex(n);
+        const band = bands[getBandIndex(n)];
+        const position = ((n - 1) / Math.max(1, currentGame.max - 1)) * 2 - 1;
+        const sectorNorm = sectorScores[sector] / maxSectorScore;
+        const frequencyNorm = frequencyScore[n] / maxFrequency;
+        const isHot = hotSet.has(n);
+        const isCold = coldSet.has(n);
+        const isLatest = latestSet.has(n);
+
+        const sectorComponent = sectorNorm * 35;
+        const hotColdComponent = isHot ? 20 : isCold ? -18 : frequencyNorm * 10;
+        const returnComponent = isLatest ? patternModel.returnScores[n] * 15 : 0;
+        const pairComponent = patternModel.pairCentrality[n] * 12;
+        const tripleComponent = patternModel.tripleCentrality[n] * 7;
+        const quadComponent = patternModel.quadCentrality[n] * 3;
+        const migrationAlignment = direction === 0
+            ? 0.5
+            : clamp((1 + direction * position) / 2, 0, 1);
+        const migrationComponent = migrationAlignment * migrationStrength * 5;
+        const parityFit = n % 2 === 0
+            ? sectorEvenShares[sector]
+            : 1 - sectorEvenShares[sector];
+        const parityComponent = parityFit * 3;
+        const focusComponent = focusKeys.includes(band.key) ? 5 : 0;
+
+        const total = Math.max(
+            0.01,
+            sectorComponent + hotColdComponent + returnComponent + pairComponent +
+            tripleComponent + quadComponent + migrationComponent + parityComponent + focusComponent
+        );
+
+        numberScores[n] = total;
+        numberComponents[n] = {
+            total,
+            sector: sectorComponent,
+            hotCold: hotColdComponent,
+            return: returnComponent,
+            pair: pairComponent,
+            triple: tripleComponent,
+            quad: quadComponent,
+            migration: migrationComponent,
+            parity: parityComponent,
+            focus: focusComponent,
+            status: isHot ? "HOT" : isCold ? "COLD" : "MID",
+            returnRate: isLatest ? patternModel.returnScores[n] : 0,
+            isLatest
+        };
+        rankedNumbers.push({ number: n, score: total });
+    }
+    rankedNumbers.sort((a, b) => b.score - a.score || a.number - b.number);
+
+    const activeNumberSet = new Set();
+    structure.forEach((quota, sectorIndex) => {
+        if (quota <= 0) return;
+        const bounds = getSectorBounds(sectorIndex);
+        for (let n = bounds.start; n <= bounds.end; n++) activeNumberSet.add(n);
+    });
+
+    const topPairs = getTopPatternEntries(patternModel.pairScores, activeNumberSet, 5, structure);
+    const topTriples = getTopPatternEntries(patternModel.tripleScores, activeNumberSet, 4, structure);
+    const topQuads = getTopPatternEntries(patternModel.quadScores, activeNumberSet, 3, structure);
+
+    const repeatCandidates = patternModel.latestNumbers
+        .filter(number => activeNumberSet.has(number))
+        .map(number => ({
+            number,
+            rate: patternModel.returnScores[number],
+            score: numberScores[number]
+        }))
+        .sort((a, b) => b.rate - a.rate || b.score - a.score)
+        .slice(0, currentGame === games.multi ? 7 : 4);
+
+    const suggestedReturnCount = clamp(
+        Math.round(
+            patternModel.averageReturnCount *
+            (targetCount / Math.max(1, getHistoricalDrawCount()))
+        ),
+        0,
+        Math.min(targetCount, repeatCandidates.length)
+    );
+
+    // Spójność profilu 5/10/15 — to nie jest prawdopodobieństwo trafienia.
+    let sectorDispersion = 0;
+    for (let sector = 0; sector < sectorCount; sector++) {
+        const values = windowAnalyses
+            .filter(x => x.windowSize)
+            .map(x => x.sectorShares[sector]);
+        sectorDispersion += standardDeviation(values);
+    }
+    sectorDispersion /= Math.max(1, sectorCount);
+
+    let bandDispersion = 0;
+    for (let band = 0; band < bands.length; band++) {
+        const values = windowAnalyses
+            .filter(x => x.windowSize)
+            .map(x => x.bandShares[band]);
+        bandDispersion += standardDeviation(values);
+    }
+    bandDispersion /= Math.max(1, bands.length);
+
+    const confidence = Math.round(clamp(
+        94 - sectorDispersion * 190 - bandDispersion * 150,
+        35,
+        95
+    ));
+
+    const recentStructures = draws
+        .slice(-Math.min(5, draws.length))
+        .reverse()
+        .map(draw => ({
+            date: draw.data,
+            structure: getStructureForNumbers(draw.liczby || [])
+        }));
 
     return {
         ok: true,
         targetCount,
         modeLabel: windowConfig.label,
         windowsUsed: windowAnalyses.map(x => x.windowSize).join(" / "),
+        migrationText,
+        migrationDelta,
+        migrationStrength,
+        direction,
+        confidence,
+        thresholds,
+        bandStats,
+        dominantBand,
+        focusKeys,
+        focusZone: focusKeys.join("/"),
+        focusRawShare,
+        focusIntensity,
+        focusPercent,
+        focusTargetCount,
+        outsideTargetCount,
+        signalStrength,
         structure,
-        wantedEven,
-        wantedOdd,
-        sumMin,
-        sumMax,
-        targetSum,
+        activeSectors,
+        suggestedEven,
+        suggestedOdd,
+        focusEvenShare,
         hotPool,
         coldPool,
-        requiredCount,
-        migrationText,
-        confidence,
-        sectorShares,
-        secondary
+        rankedNumbers,
+        numberScores,
+        numberComponents,
+        patternModel,
+        repeatCandidates,
+        suggestedReturnCount,
+        topPairs,
+        topTriples,
+        topQuads,
+        sectorScores,
+        recentStructures,
+        historicalDrawCount: getHistoricalDrawCount(),
+        meanNumber
     };
 }
 
-function applyAutoForgeSettings(analysis) {
-    // Multi Multi najpierw ustala wielkość kuponu.
+
+function buildAutoForgeGenerationPlan(analysis) {
+    // HOT oznacza wyłącznie prawdziwy TOP HOT z diagnozy.
+    // Szerszy ranking liczbowy jest osobnym mechanizmem i nie miesza etykiet.
+    const hotPool = [...(analysis.hotPool || [])];
+    const hotBySector = new Array(currentGame.ranges.length).fill(0);
+    hotPool.forEach(number => hotBySector[getSectorIndex(number)]++);
+
+    const maxHotThatFits = analysis.structure.reduce(
+        (sum, quota, index) => sum + Math.min(quota, hotBySector[index]),
+        0
+    );
+
+    const hotRatio = analysis.signalStrength >= 0.68
+        ? 0.55
+        : analysis.signalStrength >= 0.42
+            ? 0.45
+            : 0.35;
+
+    const hotCount = clamp(
+        Math.min(
+            Math.round(analysis.targetCount * hotRatio),
+            maxHotThatFits,
+            hotPool.length
+        ),
+        0,
+        analysis.targetCount
+    );
+
+    return {
+        analysis,
+        targetCount: analysis.targetCount,
+        structure: [...analysis.structure],
+        hotPool,
+        hotCount,
+        coldPool: [...(analysis.coldPool || [])],
+        numberScores: analysis.numberScores || [],
+        numberComponents: analysis.numberComponents || [],
+        patternModel: analysis.patternModel || null,
+        sectorScores: analysis.sectorScores || [],
+        suggestedEven: analysis.suggestedEven,
+        suggestedOdd: analysis.suggestedOdd,
+        suggestedReturnCount: analysis.suggestedReturnCount || 0,
+        lastSelectedHotNumbers: [],
+        lastColdPoolUsed: [],
+        selectionTrace: []
+    };
+}
+
+function getSafeAutoForgeColdPool(plan, manualExcludedNumbers = [], manualRequiredPool = []) {
+    if (!plan) return [];
+
+    const manualExcludedSet = new Set(manualExcludedNumbers);
+    const manualRequiredSet = new Set(manualRequiredPool);
+    const safeCold = [];
+
+    for (const number of plan.coldPool) {
+        if (manualRequiredSet.has(number) || manualExcludedSet.has(number)) continue;
+
+        const sector = getSectorIndex(number);
+        const quota = plan.structure[sector] || 0;
+        const bounds = getSectorBounds(sector);
+
+        const unavailableManual = [...manualExcludedSet]
+            .filter(n => getSectorIndex(n) === sector).length;
+        const unavailableAuto = safeCold
+            .filter(n => getSectorIndex(n) === sector).length;
+
+        const availableAfterExclusion =
+            bounds.capacity - unavailableManual - unavailableAuto - 1;
+
+        if (availableAfterExclusion >= quota) {
+            safeCold.push(number);
+        }
+    }
+
+    return safeCold;
+}
+
+
+function getBestPatternMatch(number, selectedNumbers, size, scoreMap, maxScore) {
+    if (!scoreMap || !selectedNumbers?.length || selectedNumbers.length < size - 1) {
+        return { raw: 0, normalized: 0, numbers: [] };
+    }
+
+    let bestRaw = 0;
+    let bestNumbers = [];
+
+    forEachCombination(selectedNumbers, size - 1, combo => {
+        const numbers = [...combo, number].sort((a, b) => a - b);
+        const raw = getPatternScore(scoreMap, numbers);
+        if (raw > bestRaw) {
+            bestRaw = raw;
+            bestNumbers = numbers;
+        }
+    });
+
+    return {
+        raw: bestRaw,
+        normalized: maxScore > 0 ? clamp(bestRaw / maxScore, 0, 1) : 0,
+        numbers: bestNumbers
+    };
+}
+
+function filterAutoForgePoolByParity(pool, plan, selectedNumbers = []) {
+    if (!plan || !Array.isArray(pool) || !pool.length) return pool;
+
+    const selectedEven = selectedNumbers.filter(number => number % 2 === 0).length;
+    const selectedOdd = selectedNumbers.length - selectedEven;
+    const remainingEven = Math.max(0, (plan.suggestedEven ?? plan.targetCount) - selectedEven);
+    const remainingOdd = Math.max(0, (plan.suggestedOdd ?? 0) - selectedOdd);
+
+    if (remainingEven <= 0) {
+        const oddOnly = pool.filter(number => number % 2 !== 0);
+        return oddOnly.length ? oddOnly : pool;
+    }
+
+    if (remainingOdd <= 0) {
+        const evenOnly = pool.filter(number => number % 2 === 0);
+        return evenOnly.length ? evenOnly : pool;
+    }
+
+    return pool;
+}
+
+function getAutoForgeCandidateScore(number, plan, selectedNumbers = []) {
+    const base = Math.max(0.01, Number(plan?.numberScores?.[number]) || 0.01);
+    const pattern = plan?.patternModel;
+
+    if (!pattern) {
+        return {
+            score: base,
+            base,
+            pair: { raw: 0, normalized: 0, numbers: [] },
+            triple: { raw: 0, normalized: 0, numbers: [] },
+            quad: { raw: 0, normalized: 0, numbers: [] },
+            returnRate: 0,
+            returnBoost: 0,
+            parityBoost: 0
+        };
+    }
+
+    const pair = getBestPatternMatch(
+        number,
+        selectedNumbers,
+        2,
+        pattern.pairScores,
+        pattern.maxPairScore
+    );
+    const triple = getBestPatternMatch(
+        number,
+        selectedNumbers,
+        3,
+        pattern.tripleScores,
+        pattern.maxTripleScore
+    );
+    const quad = getBestPatternMatch(
+        number,
+        selectedNumbers,
+        4,
+        pattern.quadScores,
+        pattern.maxQuadScore
+    );
+
+    const latestSet = new Set(pattern.latestNumbers || []);
+    const isReturnCandidate = latestSet.has(number);
+    const returnRate = isReturnCandidate ? (pattern.returnScores[number] || 0) : 0;
+    const selectedReturnCount = selectedNumbers.filter(n => latestSet.has(n)).length;
+    const targetReturns = Math.max(0, plan.suggestedReturnCount || 0);
+    const returnUrgency = targetReturns > 0
+        ? clamp((targetReturns - selectedReturnCount) / targetReturns, 0, 1)
+        : 0;
+    const returnBoost = isReturnCandidate
+        ? returnRate * 12 + returnUrgency * 5
+        : 0;
+
+    const selectedEven = selectedNumbers.filter(n => n % 2 === 0).length;
+    const selectedOdd = selectedNumbers.length - selectedEven;
+    const remainingSlots = Math.max(1, plan.targetCount - selectedNumbers.length);
+    const remainingEven = Math.max(0, (plan.suggestedEven ?? plan.targetCount) - selectedEven);
+    const remainingOdd = Math.max(0, (plan.suggestedOdd ?? 0) - selectedOdd);
+    const desiredParityShare = number % 2 === 0
+        ? remainingEven / remainingSlots
+        : remainingOdd / remainingSlots;
+    const parityBoost = clamp(desiredParityShare, 0, 1) * 6;
+
+    const score = Math.max(
+        0.01,
+        base +
+        pair.normalized * 18 +
+        triple.normalized * 10 +
+        quad.normalized * 5 +
+        returnBoost +
+        parityBoost
+    );
+
+    return {
+        score,
+        base,
+        pair,
+        triple,
+        quad,
+        returnRate,
+        returnBoost,
+        parityBoost
+    };
+}
+
+function getAutoForgeWeightedRandomIndex(pool, plan, selectedNumbers = []) {
+    if (!pool.length) return -1;
+
+    const scored = pool.map(number =>
+        getAutoForgeCandidateScore(number, plan, selectedNumbers)
+    );
+    const maxScore = Math.max(...scored.map(item => item.score), 0.0001);
+
+    // Nadal zostawiamy RNG, ale mocniej przechylamy je w stronę najlepiej
+    // ocenionych liczb. Dzięki bazowej wadze słabszy kandydat nie ma zera.
+    const weights = scored.map(item => {
+        const normalized = clamp(item.score / maxScore, 0, 1);
+        return 0.10 + Math.pow(normalized, 2.15) * 3.40;
+    });
+    const total = weights.reduce((a, b) => a + b, 0);
+
+    let roll = Math.random() * total;
+    for (let i = 0; i < weights.length; i++) {
+        roll -= weights[i];
+        if (roll <= 0) return i;
+    }
+
+    return pool.length - 1;
+}
+
+function traceAutoForgeSelection(plan, number, source, selectedBefore = []) {
+    if (!plan) return;
+    const details = getAutoForgeCandidateScore(number, plan, selectedBefore);
+    plan.selectionTrace.push({
+        number,
+        source,
+        selectedBefore: [...selectedBefore],
+        ...details
+    });
+}
+
+function formatPatternEntries(entries = []) {
+    if (!entries.length) return "—";
+    return entries
+        .map(item => `${item.numbers.join("-")} (${Math.round(item.score * 100)}%)`)
+        .join(" • ");
+}
+
+function buildAutoForgeTicketExplanations(numbers, plan) {
+    const pattern = plan?.patternModel;
+    if (!plan || !pattern) return [];
+
+    const rows = numbers.map(number => {
+        const others = numbers.filter(n => n !== number);
+        const component = plan.numberComponents?.[number] || {
+            total: plan.numberScores?.[number] || 0,
+            status: "MID",
+            returnRate: 0,
+            isLatest: false
+        };
+
+        const pair = getBestPatternMatch(
+            number, others, 2, pattern.pairScores, pattern.maxPairScore
+        );
+        const triple = getBestPatternMatch(
+            number, others, 3, pattern.tripleScores, pattern.maxTripleScore
+        );
+        const quad = getBestPatternMatch(
+            number, others, 4, pattern.quadScores, pattern.maxQuadScore
+        );
+
+        const rawScore = Math.max(
+            0.01,
+            (component.total || 0) +
+            pair.normalized * 18 +
+            triple.normalized * 10 +
+            quad.normalized * 5
+        );
+
+        const relations = [];
+        if (pair.raw > 0) relations.push(`para ${pair.numbers.join("-")}`);
+        if (triple.raw > 0) relations.push(`trójka ${triple.numbers.join("-")}`);
+        if (quad.raw > 0) relations.push(`czwórka ${quad.numbers.join("-")}`);
+
+        const reasons = [`sektor ${getSectorLabel(getSectorIndex(number))}`];
+        if (component.status === "HOT") reasons.unshift("HOT");
+        if (component.isLatest && component.returnRate > 0) {
+            reasons.push(`powrót ${Math.round(component.returnRate * 100)}%`);
+        }
+        if (pair.normalized >= 0.25 && pair.numbers.length) {
+            reasons.push(`mocna para z ${pair.numbers.filter(n => n !== number).join("/")}`);
+        }
+        if (triple.normalized >= 0.20 && triple.numbers.length) {
+            reasons.push("wsparcie trójki");
+        }
+
+        return {
+            number,
+            sector: getSectorLabel(getSectorIndex(number)),
+            status: component.status || "MID",
+            returnRate: component.isLatest ? component.returnRate || 0 : null,
+            relations: relations.slice(0, 2),
+            reasons,
+            rawScore
+        };
+    });
+
+    const maxRaw = Math.max(...rows.map(row => row.rawScore), 0.0001);
+    rows.forEach(row => {
+        row.score100 = Math.round(clamp(row.rawScore / maxRaw, 0, 1) * 100);
+    });
+
+    return rows.sort((a, b) => b.score100 - a.score100 || a.number - b.number);
+}
+
+function getWeightedRandomIndex(pool, numberScores = []) {
+    if (!pool.length) return -1;
+    if (!numberScores || !numberScores.length) {
+        return Math.floor(Math.random() * pool.length);
+    }
+
+    const rawScores = pool.map(number =>
+        Math.max(0, Number(numberScores[number]) || 0)
+    );
+    const maxScore = Math.max(...rawScores, 0.0001);
+    const weights = rawScores.map(score => 0.30 + (score / maxScore) * 1.70);
+    const total = weights.reduce((a, b) => a + b, 0);
+
+    let roll = Math.random() * total;
+    for (let i = 0; i < weights.length; i++) {
+        roll -= weights[i];
+        if (roll <= 0) return i;
+    }
+
+    return pool.length - 1;
+}
+
+function drawAutoForgeHotNumbers(
+    plan,
+    existingRequired = [],
+    blockedRequired = [],
+    excludedNumbers = []
+) {
+    if (!plan || plan.hotCount <= 0) return [];
+
+    const hotSet = new Set(plan.hotPool);
+    const alreadyHot = existingRequired.filter(number => hotSet.has(number)).length;
+    let needed = Math.max(0, plan.hotCount - alreadyHot);
+    if (!needed) return [];
+
+    const blockedSet = new Set(blockedRequired);
+    const excludedSet = new Set(excludedNumbers);
+    const selectedSet = new Set(existingRequired);
+    const sectorUsed = new Array(currentGame.ranges.length).fill(0);
+
+    existingRequired.forEach(number => sectorUsed[getSectorIndex(number)]++);
+
+    const available = plan.hotPool.filter(number =>
+        !selectedSet.has(number) &&
+        !blockedSet.has(number) &&
+        !excludedSet.has(number)
+    );
+
+    const selected = [];
+
+    while (needed > 0 && available.length) {
+        const selectedContext = [...existingRequired, ...selected];
+        let allowed = available.filter(number => {
+            const sector = getSectorIndex(number);
+            return sectorUsed[sector] < (plan.structure[sector] || 0);
+        });
+
+        if (!allowed.length) break;
+
+        const parityAllowed = filterAutoForgePoolByParity(
+            allowed,
+            plan,
+            selectedContext
+        );
+        if (parityAllowed.length) allowed = parityAllowed;
+
+        const allowedIndex = getAutoForgeWeightedRandomIndex(
+            allowed,
+            plan,
+            selectedContext
+        );
+        const number = allowed[allowedIndex];
+        const originalIndex = available.indexOf(number);
+        if (originalIndex >= 0) available.splice(originalIndex, 1);
+
+        traceAutoForgeSelection(plan, number, "HOT", selectedContext);
+        selected.push(number);
+        sectorUsed[getSectorIndex(number)]++;
+        needed--;
+    }
+
+    return selected;
+}
+
+function applyAutoForgeProfileToControls(analysis) {
     if (currentGame === games.multi) {
         currentGame.count = analysis.targetCount;
     }
 
     const structureFilter = document.getElementById("structureFilter");
-    structureFilter.checked = true;
+    if (structureFilter) structureFilter.checked = true;
 
     analysis.structure.forEach((value, index) => {
         const input = document.getElementById(`r${index + 1}`);
         if (input) input.value = value;
     });
 
-    document.getElementById("evenOddFilter").checked = true;
-    document.getElementById("evenCount").value = analysis.wantedEven;
-    document.getElementById("oddCount").value = analysis.wantedOdd;
+    const evenOddFilter = document.getElementById("evenOddFilter");
+    if (evenOddFilter) evenOddFilter.checked = true;
 
-    document.getElementById("sumFilter").checked = true;
-    document.getElementById("sumMin").value = analysis.sumMin;
-    document.getElementById("sumMax").value = analysis.sumMax;
+    const evenInput = document.getElementById("evenCount");
+    const oddInput = document.getElementById("oddCount");
+    if (evenInput) evenInput.value = analysis.suggestedEven;
+    if (oddInput) oddInput.value = analysis.suggestedOdd;
 
-    document.getElementById("requiredFilter").checked = true;
-    document.getElementById("requiredNumbers").value = analysis.hotPool.join(",");
-    document.getElementById("requiredCount").value = analysis.requiredCount;
+    // Zgodnie z filozofią AUTO FORGE nie pozwalamy sumie sterować kuponem.
+    // Manualny generator nadal może korzystać z tego filtra po ponownym włączeniu.
+    const sumFilter = document.getElementById("sumFilter");
+    if (sumFilter) sumFilter.checked = false;
+}
 
-    document.getElementById("excludeFilter").checked = true;
-    document.getElementById("excludedNumbers").value = analysis.coldPool.join(",");
+function renderAutoForgeGenerationResult(analysis, plan, numbers) {
+    const container = document.getElementById("autoForgeGenerationResult");
+    if (!container || !Array.isArray(numbers)) return;
+
+    const hotSet = new Set(plan.hotPool);
+    const hotOnTicket = numbers.filter(number => hotSet.has(number));
+    const structure = getStructureForNumbers(numbers);
+    const even = numbers.filter(number => number % 2 === 0).length;
+    const odd = numbers.length - even;
+    const latestSet = new Set(plan.patternModel?.latestNumbers || []);
+    const returnsOnTicket = numbers.filter(number => latestSet.has(number));
+    const explanations = buildAutoForgeTicketExplanations(numbers, plan);
+
+    const explanationRows = explanations.map(row => `
+        <tr>
+            <td><strong>${String(row.number).padStart(2, "0")}</strong></td>
+            <td>${row.sector}</td>
+            <td><span class="af-status af-status-${row.status.toLowerCase()}">${row.status}</span></td>
+            <td>${row.returnRate === null ? "—" : `${Math.round(row.returnRate * 100)}%`}</td>
+            <td>${row.relations.length ? row.relations.join(" • ") : "—"}</td>
+            <td><strong>${row.score100}</strong></td>
+        </tr>
+    `).join("");
+
+    container.innerHTML = `
+        <div class="auto-forge-generation-result">
+            <div class="auto-forge-generation-head">
+                <div>
+                    <span>🎯 PROFIL ZASTOSOWANY</span>
+                    <strong>Kupon osadzony w strefie ${analysis.focusZone}</strong>
+                </div>
+                <strong>${analysis.focusTargetCount}/${analysis.targetCount} liczb w strefie docelowej</strong>
+            </div>
+
+            <div class="auto-forge-generation-grid">
+                <div><span>Struktura kuponu</span><strong>${structure}</strong></div>
+                <div><span>Parzystość</span><strong>${even}/${odd}</strong></div>
+                <div><span>HOT w kuponie</span><strong>${hotOnTicket.length}: ${hotOnTicket.join(", ") || "—"}</strong></div>
+                <div><span>Powroty z ostatniego</span><strong>${returnsOnTicket.length}: ${returnsOnTicket.join(", ") || "—"}</strong></div>
+                <div><span>COLD wyłączone</span><strong>${plan.lastColdPoolUsed.join(", ") || "—"}</strong></div>
+                <div><span>Cel powrotów</span><strong>${plan.suggestedReturnCount} • sygnał miękki</strong></div>
+            </div>
+
+            <div class="auto-forge-choice-engine">
+                <div class="auto-forge-choice-head">
+                    <div>
+                        <span>🧬 SILNIK WYBORU LICZB</span>
+                        <strong>Dlaczego te liczby dostały priorytet?</strong>
+                    </div>
+                    <small>AUTO SCORE jest względną oceną wewnątrz tego kuponu.</small>
+                </div>
+                <div class="auto-forge-table-wrap">
+                    <table class="auto-forge-choice-table">
+                        <thead>
+                            <tr>
+                                <th>Liczba</th>
+                                <th>Sektor</th>
+                                <th>Status</th>
+                                <th>Powrót</th>
+                                <th>Relacje</th>
+                                <th>AUTO SCORE</th>
+                            </tr>
+                        </thead>
+                        <tbody>${explanationRows}</tbody>
+                    </table>
+                </div>
+            </div>
+
+            <p>
+                Najpierw obowiązuje struktura wynikająca z migracji i skupisk. Dopiero wewnątrz tych sektorów
+                AUTO FORGE waży HOT/MID/COLD, powroty, pary, trójki, czwórki i parzystość. Losowość jest ostatnim krokiem,
+                więc kupony mogą się różnić, ale pozostają wierne temu samemu profilowi danych.
+            </p>
+        </div>
+    `;
+}
+
+function generateAutoForgeFromAnalysis(analysis) {
+    const plan = buildAutoForgeGenerationPlan(analysis);
+    applyAutoForgeProfileToControls(analysis);
+
+    const numbers = generateMiniLotto(0, plan);
+    if (!Array.isArray(numbers) || !numbers.length) return;
+
+    renderAutoForgeGenerationResult(analysis, plan, numbers);
 }
 
 function renderAutoForgeReport(analysis) {
@@ -984,34 +2171,193 @@ function renderAutoForgeReport(analysis) {
         analysis.confidence >= 75 ? "high" :
         analysis.confidence >= 55 ? "medium" : "low";
 
+    const signalClass =
+        analysis.signalStrength >= 0.68 ? "high" :
+        analysis.signalStrength >= 0.42 ? "medium" : "low";
+
+    const signalLabel =
+        analysis.signalStrength >= 0.68 ? "MOCNY" :
+        analysis.signalStrength >= 0.42 ? "ŚREDNI" : "SŁABY";
+
+    const bandCards = analysis.bandStats.map(band => {
+        const percentage = Math.round(band.share * 100);
+        const intensity = band.intensity.toFixed(2);
+        const active = analysis.focusKeys.includes(band.key) ? " active" : "";
+
+        return `
+            <div class="auto-forge-band${active}">
+                <div class="auto-forge-band-head">
+                    <strong>${band.label}</strong>
+                    <span>${band.start}-${band.end}</span>
+                </div>
+                <div class="auto-forge-band-value">${percentage}%</div>
+                <div class="auto-forge-band-bar"><i style="width:${clamp(percentage, 0, 100)}%"></i></div>
+                <small>śr. ${band.averageCount.toFixed(1)} kul / los. • aktywność ×${intensity}</small>
+            </div>
+        `;
+    }).join("");
+
+    const sectorRows = analysis.activeSectors.map((sector, rank) => `
+        <tr class="${sector.suggested >= 2 ? "sector-strong" : ""}">
+            <td><strong>#${rank + 1}</strong></td>
+            <td><strong>${sector.label}</strong></td>
+            <td>${sector.averageCount.toFixed(2)}</td>
+            <td>${Math.round(sector.clusterRate * 100)}%</td>
+            <td>${Math.round(sector.strongClusterRate * 100)}%</td>
+            <td>${sector.maxCluster}</td>
+            <td>${Math.round(sector.evenShare * 100)} / ${100 - Math.round(sector.evenShare * 100)}</td>
+            <td><strong>${sector.suggested}</strong></td>
+        </tr>
+    `).join("");
+
+    const recentRows = analysis.recentStructures.map(item => `
+        <div class="auto-forge-recent-row">
+            <span>${item.date}</span>
+            <strong>${item.structure}</strong>
+        </div>
+    `).join("");
+
+    const repeatCandidatesText = analysis.repeatCandidates.length
+        ? analysis.repeatCandidates
+            .map(item => `${item.number} (${Math.round(item.rate * 100)}%)`)
+            .join(" • ")
+        : "—";
+
+    const topPairsText = formatPatternEntries(analysis.topPairs);
+    const topTriplesText = formatPatternEntries(analysis.topTriples);
+    const topQuadsText = formatPatternEntries(analysis.topQuads);
+
     report.innerHTML = `
-        <div class="auto-forge-card">
+        <div class="auto-forge-card auto-forge-diagnostic">
             <div class="auto-forge-title">
-                <strong>🧠 AUTO FORGE — konfiguracja wybrana</strong>
+                <div>
+                    <strong>🧠 AUTO FORGE — DIAGNOZA PLANSZY</strong>
+                    <small>ETAP 4 • analiza → struktura → silnik wyboru liczb</small>
+                </div>
                 <span class="confidence ${confidenceClass}">
                     Spójność ${analysis.confidence}/100
                 </span>
             </div>
 
-            <div class="auto-forge-grid">
-                <div><span>Tryb analizy</span><strong>${analysis.modeLabel} (${analysis.windowsUsed})</strong></div>
-                <div><span>Struktura</span><strong>${analysis.structure.join("-")}</strong></div>
-                <div><span>Parzystość</span><strong>${analysis.wantedEven}/${analysis.wantedOdd}</strong></div>
-                <div><span>Suma</span><strong>${analysis.sumMin}-${analysis.sumMax} (cel ${analysis.targetSum})</strong></div>
-                <div><span>Migracja</span><strong>${analysis.migrationText}</strong></div>
-                <div><span>HOT</span><strong>${analysis.hotPool.join(", ")}</strong></div>
-                <div><span>HOT → losuj</span><strong>${analysis.requiredCount} z ${analysis.hotPool.length}</strong></div>
-                <div><span>COLD → wyklucz</span><strong>${analysis.coldPool.join(", ")}</strong></div>
-                ${analysis.secondary ? `
-                <div><span>${analysis.secondary.type === "euro" ? "⭐ Euro — pula" : "⭐ Extra — pula"}</span><strong>${analysis.secondary.pool.length ? analysis.secondary.pool.join(", ") : "brak danych dodatkowych"}</strong></div>
-                ` : ""}
+            <div class="auto-forge-decision-banner">
+                <div>
+                    <span>KIERUNEK</span>
+                    <strong>${analysis.migrationText}</strong>
+                </div>
+                <div>
+                    <span>STREFA DOCELOWA</span>
+                    <strong>${analysis.focusZone}</strong>
+                </div>
+                <div>
+                    <span>KONCENTRACJA ${analysis.targetCount} LICZB</span>
+                    <strong>${analysis.focusTargetCount}/${analysis.targetCount} w ${analysis.focusZone} (${analysis.focusPercent}%)</strong>
+                </div>
+                <div>
+                    <span>SIŁA SYGNAŁU</span>
+                    <strong class="signal-${signalClass}">${signalLabel} • ${Math.round(analysis.signalStrength * 100)}/100</strong>
+                </div>
             </div>
 
+            <div class="auto-forge-grid">
+                <div><span>Dominująca strefa</span><strong>${analysis.dominantBand.key} • aktywność ×${analysis.dominantBand.intensity.toFixed(2)}</strong></div>
+                <div><span>Sugerowana struktura</span><strong>${analysis.structure.join("-")}</strong></div>
+                <div><span>Parzystość aktywnej strefy</span><strong>${analysis.suggestedEven}/${analysis.suggestedOdd} • ${Math.round(analysis.focusEvenShare * 100)}% parzystych</strong></div>
+                <div><span>Skupisko</span><strong>próg ${analysis.thresholds.cluster}+ • mocne ${analysis.thresholds.strong}+</strong></div>
+                <div><span>HOT — TOP trendu</span><strong>${analysis.hotPool.join(", ")}</strong></div>
+                <div><span>COLD — dół trendu</span><strong>${analysis.coldPool.join(", ")}</strong></div>
+            </div>
+
+            <div class="auto-forge-section">
+                <h4>📍 LOW / MID / HIGH — gdzie teraz siedzą kule?</h4>
+                <div class="auto-forge-band-grid">${bandCards}</div>
+            </div>
+
+            <div class="auto-forge-section">
+                <h4>🔥 Najaktywniejsze sektory i skupiska</h4>
+                <div class="auto-forge-table-wrap">
+                    <table class="auto-forge-sector-table">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Sektor</th>
+                                <th>Śr. kul</th>
+                                <th>${analysis.thresholds.cluster}+ kul</th>
+                                <th>${analysis.thresholds.strong}+ kul</th>
+                                <th>Max</th>
+                                <th>P/N %</th>
+                                <th>Do struktury</th>
+                            </tr>
+                        </thead>
+                        <tbody>${sectorRows}</tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="auto-forge-section auto-forge-pattern-section">
+                <h4>🔁 Powroty + pary + trójki + czwórki</h4>
+                <div class="auto-forge-pattern-grid">
+                    <div>
+                        <span>Śr. powrotów w pełnym losowaniu</span>
+                        <strong>${analysis.patternModel.averageReturnCount.toFixed(2)}</strong>
+                    </div>
+                    <div>
+                        <span>Miękki cel dla ${analysis.targetCount} typów</span>
+                        <strong>${analysis.suggestedReturnCount}</strong>
+                    </div>
+                    <div class="wide">
+                        <span>Kandydaci do powrotu z ostatniego losowania</span>
+                        <strong>${repeatCandidatesText}</strong>
+                    </div>
+                    <div class="wide">
+                        <span>Najmocniejsze pary w aktywnej strukturze</span>
+                        <strong>${topPairsText}</strong>
+                    </div>
+                    <div class="wide">
+                        <span>Najmocniejsze trójki</span>
+                        <strong>${topTriplesText}</strong>
+                    </div>
+                    <div class="wide">
+                        <span>Czwórki — sygnał pomocniczy</span>
+                        <strong>${topQuadsText}</strong>
+                    </div>
+                </div>
+                <small class="auto-forge-pattern-note">
+                    Procent przy relacji oznacza ważoną częstość współwystąpienia w aktualnych oknach analizy 5/10/15.
+                    Powroty i relacje są wagami wyboru, nie sztywnymi wymogami kuponu.
+                </small>
+            </div>
+
+            <div class="auto-forge-section">
+                <h4>🧩 Ostatnie struktury — kontrola wzorca</h4>
+                <div class="auto-forge-recent-list">${recentRows}</div>
+            </div>
+
+            <div class="auto-forge-next-step">
+                <div>
+                    <span>ETAP 4 — SILNIK WYBORU LICZB AKTYWNY</span>
+                    <strong>Profil wybiera sektory, a scoring decyduje które liczby wewnątrz nich mają priorytet.</strong>
+                    <small>Struktura → HOT/MID/COLD → powroty → pary/trójki/czwórki → parzystość → ważone RNG. Suma nie steruje AUTO FORGE.</small>
+                </div>
+                <button id="autoForgeGenerateFromProfileBtn" class="primary-btn auto-forge-generate-profile-btn">
+                    🎯 GENERUJ Z TEGO PROFILU
+                </button>
+            </div>
+
+            <div id="autoForgeGenerationResult"></div>
+
             <p class="auto-forge-note">
-                Spójność opisuje stabilność danych użytych przez AUTO FORGE; w trybie 5/10/15 uwzględnia zgodność kilku okien.
+                Najpierw AUTO FORGE czyta planszę. Dopiero przyciskiem powyżej uruchamiasz generator z tą decyzją.
+                Manualne liczby obowiązkowe i ręczne wykluczenia nadal są respektowane.
             </p>
         </div>
     `;
+
+    const generateFromProfileBtn = document.getElementById("autoForgeGenerateFromProfileBtn");
+    if (generateFromProfileBtn) {
+        generateFromProfileBtn.addEventListener("click", () => {
+            generateAutoForgeFromAnalysis(analysis);
+        });
+    }
 }
 
 function runAutoForge() {
@@ -1022,41 +2368,10 @@ function runAutoForge() {
         return;
     }
 
-    applyAutoForgeSettings(analysis);
-    renderAutoForgeReport(analysis);
-
+    // AUTO FORGE zawsze najpierw tworzy diagnozę. Generator uruchamia się dopiero
+    // osobnym przyciskiem "GENERUJ Z TEGO PROFILU", więc decyzja pozostaje czytelna.
     autoForgeSecondaryOverride = null;
-
-    if (analysis.secondary?.pool?.length) {
-        if (analysis.secondary.type === "euro") {
-            const excluded = document.getElementById("euroExcludeFilter")?.checked
-                ? (document.getElementById("euroExcludedNumbers")?.value || "")
-                    .split(",")
-                    .map(n => Number(n.trim()))
-                    .filter(Number.isInteger)
-                : [];
-
-            const selected = drawFromPool(
-                analysis.secondary.pool,
-                analysis.secondary.count,
-                excluded
-            );
-
-            if (selected.length === analysis.secondary.count) {
-                autoForgeSecondaryOverride = { type: "euro", numbers: selected };
-            }
-        }
-
-        if (analysis.secondary.type === "extra") {
-            const selected = drawFromPool(analysis.secondary.pool, 1);
-            if (selected.length) {
-                autoForgeSecondaryOverride = { type: "extra", numbers: selected };
-            }
-        }
-    }
-
-    // Po ustawieniu parametrów używamy istniejącego generatora i walidacji.
-    generateMiniLotto();
+    renderAutoForgeReport(analysis);
 }
 
 function validateStructureSettings() {
@@ -1119,16 +2434,25 @@ function validateStructureSettings() {
     excludedNumbers = [],
     excludeFilter = false,
     requiredNumbers = [],
-    blockedRequiredNumbers = []
+    blockedRequiredNumbers = [],
+    numberScores = null,
+    autoForgePlan = null
 ) {
     const result = [...requiredNumbers];
 
-    for (let i = 0; i < currentGame.ranges.length; i++) {
+    const sectorOrder = currentGame.ranges.map((_, index) => index);
+    if (autoForgePlan?.sectorScores?.length) {
+        sectorOrder.sort((a, b) =>
+            (autoForgePlan.sectorScores[b] || 0) - (autoForgePlan.sectorScores[a] || 0)
+        );
+    }
+
+    for (const i of sectorOrder) {
         const start = i === 0 ? 1 : currentGame.ranges[i - 1] + 1;
         const end = currentGame.ranges[i];
         const wanted = Number(document.getElementById(`r${i + 1}`).value);
 
-        const requiredInRange = requiredNumbers.filter(
+        const requiredInRange = result.filter(
             n => n >= start && n <= end
         ).length;
         const needed = wanted - requiredInRange;
@@ -1140,7 +2464,7 @@ function validateStructureSettings() {
         const pool = [];
         for (let n = start; n <= end; n++) {
             if (
-                !requiredNumbers.includes(n) &&
+                !result.includes(n) &&
                 !blockedRequiredNumbers.includes(n) &&
                 (!excludeFilter || !excludedNumbers.includes(n))
             ) {
@@ -1153,8 +2477,40 @@ function validateStructureSettings() {
         }
 
         for (let j = 0; j < needed; j++) {
-            const randomIndex = Math.floor(Math.random() * pool.length);
-            result.push(pool.splice(randomIndex, 1)[0]);
+            let candidatePool = pool;
+
+            if (autoForgePlan) {
+                const parityPool = filterAutoForgePoolByParity(
+                    pool,
+                    autoForgePlan,
+                    result
+                );
+                if (parityPool.length) candidatePool = parityPool;
+            }
+
+            const randomIndex = autoForgePlan
+                ? getAutoForgeWeightedRandomIndex(
+                    candidatePool,
+                    autoForgePlan,
+                    result
+                )
+                : getWeightedRandomIndex(candidatePool, numberScores || []);
+
+            const selected = candidatePool[randomIndex];
+            const originalIndex = pool.indexOf(selected);
+            if (originalIndex < 0) return null;
+
+            if (autoForgePlan) {
+                traceAutoForgeSelection(
+                    autoForgePlan,
+                    selected,
+                    "RANKING",
+                    result
+                );
+            }
+
+            result.push(selected);
+            pool.splice(originalIndex, 1);
         }
     }
 
@@ -1282,249 +2638,287 @@ function drawRequiredNumbers(excludedNumbers = [], excludeFilter = false) {
     return selected;
 }
 
-function generateMiniLotto(attempt = 0){
+function generateMiniLotto(attempt = 0, autoForgePlan = null) {
 
     const MAX_ATTEMPTS = 5000;
 
+    if (autoForgePlan) {
+        // Każda próba jest niezależna. Ślad decyzji pokazuje wyłącznie kupon,
+        // który ostatecznie przeszedł wszystkie filtry.
+        autoForgePlan.selectionTrace = [];
+    }
+
     if (attempt >= MAX_ATTEMPTS) {
-        alert("❌ Nie udało się wygenerować zestawu. Sprawdź filtry — mogą być niemożliwe albo zbyt restrykcyjne.");
-        return;
+        alert(
+            "❌ Nie udało się wygenerować zestawu. Sprawdź filtry — mogą być niemożliwe albo zbyt restrykcyjne."
+        );
+        return null;
     }
 
     const numbersDiv = document.getElementById("numbers");
-const sumFilter = document.getElementById("sumFilter").checked;
+    const sumFilter = document.getElementById("sumFilter").checked;
+    const sumMin = Number(document.getElementById("sumMin").value);
+    const sumMax = Number(document.getElementById("sumMax").value);
 
-const sumMin = Number(document.getElementById("sumMin").value);
-
-const sumMax = Number(document.getElementById("sumMax").value);
-    let numbers = [];
     if (currentGame === games.multi) {
-    currentGame.count = Number(document.getElementById("multiCount").value);
-}
-if (!validateStructureSettings()) {
-    return;
-}
-if (!validateEvenOddSettings()) {
-    return;
-}
-if (!validateSumSettings()) {
-    return;
-}
-const excludeFilter = document.getElementById("excludeFilter").checked;
+        currentGame.count = Number(document.getElementById("multiCount").value);
+    }
 
-const excludedNumbers = [...new Set(
-    document.getElementById("excludedNumbers").value
-        .split(",")
-        .map(n => Number(n.trim()))
-        .filter(n => Number.isInteger(n) && n >= 1 && n <= currentGame.max)
-)];
+    if (!validateStructureSettings()) return null;
+    if (!validateEvenOddSettings()) return null;
+    if (!validateSumSettings()) return null;
 
-if (!validateRequiredSettings(excludedNumbers, excludeFilter)) {
-    return;
-}
+    const excludeFilter = document.getElementById("excludeFilter").checked;
+    const manualExcludedNumbers = [...new Set(
+        document.getElementById("excludedNumbers").value
+            .split(",")
+            .map(n => Number(n.trim()))
+            .filter(n => Number.isInteger(n) && n >= 1 && n <= currentGame.max)
+    )];
 
-const requiredNumbers = drawRequiredNumbers(excludedNumbers, excludeFilter);
-const requiredSettings = getRequiredSettings();
-const blockedRequiredNumbers = requiredSettings.enabled
-    ? requiredSettings.pool.filter(n => !requiredNumbers.includes(n))
-    : [];
-const structureFilter = document.getElementById("structureFilter").checked;
+    if (!validateRequiredSettings(manualExcludedNumbers, excludeFilter)) {
+        return null;
+    }
 
-if (structureFilter) {
-    numbers = generateNumbersByStructure(
-        excludedNumbers,
-        excludeFilter,
-        requiredNumbers,
-        blockedRequiredNumbers
+    const requiredSettings = getRequiredSettings();
+    const manualRequiredNumbers = drawRequiredNumbers(
+        manualExcludedNumbers,
+        excludeFilter
     );
 
-    if (numbers === null) {
-        generateMiniLotto(attempt + 1);
-        return;
-    }
-} else {
-    numbers = [...requiredNumbers];
+    const blockedRequiredNumbers = requiredSettings.enabled
+        ? requiredSettings.pool.filter(n => !manualRequiredNumbers.includes(n))
+        : [];
 
-    while (numbers.length < currentGame.count) {
-        let n = Math.floor(Math.random() * currentGame.max) + 1;
+    const autoColdPool = autoForgePlan
+        ? getSafeAutoForgeColdPool(
+            autoForgePlan,
+            excludeFilter ? manualExcludedNumbers : [],
+            requiredSettings.enabled ? requiredSettings.pool : []
+        )
+        : [];
 
-        if (
-            !numbers.includes(n) &&
-            !blockedRequiredNumbers.includes(n) &&
-            (!excludeFilter || !excludedNumbers.includes(n))
-        ) {
-            numbers.push(n);
+    const effectiveExcludedNumbers = [...new Set([
+        ...(excludeFilter ? manualExcludedNumbers : []),
+        ...autoColdPool
+    ])];
+
+    const autoHotNumbers = autoForgePlan
+        ? drawAutoForgeHotNumbers(
+            autoForgePlan,
+            manualRequiredNumbers,
+            blockedRequiredNumbers,
+            effectiveExcludedNumbers
+        )
+        : [];
+
+    const requiredNumbers = [...new Set([
+        ...manualRequiredNumbers,
+        ...autoHotNumbers
+    ])];
+
+    const structureFilter = document.getElementById("structureFilter").checked;
+    let numbers = [];
+
+    if (structureFilter) {
+        numbers = generateNumbersByStructure(
+            effectiveExcludedNumbers,
+            effectiveExcludedNumbers.length > 0,
+            requiredNumbers,
+            blockedRequiredNumbers,
+            autoForgePlan?.numberScores || null,
+            autoForgePlan
+        );
+
+        if (numbers === null) {
+            return generateMiniLotto(attempt + 1, autoForgePlan);
+        }
+    } else {
+        numbers = [...requiredNumbers];
+        const pool = [];
+
+        for (let n = 1; n <= currentGame.max; n++) {
+            if (
+                !numbers.includes(n) &&
+                !blockedRequiredNumbers.includes(n) &&
+                !effectiveExcludedNumbers.includes(n)
+            ) {
+                pool.push(n);
+            }
+        }
+
+        while (numbers.length < currentGame.count && pool.length) {
+            let candidatePool = pool;
+            if (autoForgePlan) {
+                const parityPool = filterAutoForgePoolByParity(
+                    pool,
+                    autoForgePlan,
+                    numbers
+                );
+                if (parityPool.length) candidatePool = parityPool;
+            }
+
+            const index = autoForgePlan
+                ? getAutoForgeWeightedRandomIndex(
+                    candidatePool,
+                    autoForgePlan,
+                    numbers
+                )
+                : getWeightedRandomIndex(
+                    candidatePool,
+                    autoForgePlan?.numberScores || []
+                );
+
+            const selected = candidatePool[index];
+            const originalIndex = pool.indexOf(selected);
+            if (originalIndex < 0) break;
+
+            if (autoForgePlan) {
+                traceAutoForgeSelection(
+                    autoForgePlan,
+                    selected,
+                    "RANKING",
+                    numbers
+                );
+            }
+
+            numbers.push(selected);
+            pool.splice(originalIndex, 1);
+        }
+
+        if (numbers.length !== currentGame.count) {
+            return generateMiniLotto(attempt + 1, autoForgePlan);
         }
     }
-}
 
-const suma = numbers.reduce((a, b) => a + b, 0);
+    const suma = numbers.reduce((a, b) => a + b, 0);
 
-if (
-    (sumFilter && (suma < sumMin || suma > sumMax)) ||
-    !isEvenOddValid(numbers)
-) {
-    generateMiniLotto(attempt + 1);
-    return;
-}
+    if (
+        (sumFilter && (suma < sumMin || suma > sumMax)) ||
+        !isEvenOddValid(numbers)
+    ) {
+        return generateMiniLotto(attempt + 1, autoForgePlan);
+    }
 
+    numbers.sort((a, b) => a - b);
 
-    numbers.sort((a,b)=>a-b);
-let euroNumbers = [];
-let extraNumber = [];
+    let euroNumbers = [];
+    let extraNumber = [];
 
-if (currentGame === games.euro) {
-    euroNumbers =
-        autoForgeSecondaryOverride?.type === "euro"
-            ? [...autoForgeSecondaryOverride.numbers]
-            : generateNumbers(currentGame.euroCount, currentGame.euroMax);
-}
+    if (currentGame === games.euro) {
+        euroNumbers =
+            autoForgeSecondaryOverride?.type === "euro"
+                ? [...autoForgeSecondaryOverride.numbers]
+                : generateNumbers(currentGame.euroCount, currentGame.euroMax);
+    }
 
-if (currentGame === games.extra) {
-    extraNumber =
-        autoForgeSecondaryOverride?.type === "extra"
-            ? [...autoForgeSecondaryOverride.numbers]
-            : generateNumbers(currentGame.extraCount, currentGame.extraMax);
-}
+    if (currentGame === games.extra) {
+        extraNumber =
+            autoForgeSecondaryOverride?.type === "extra"
+                ? [...autoForgeSecondaryOverride.numbers]
+                : generateNumbers(currentGame.extraCount, currentGame.extraMax);
+    }
 
     numbersDiv.innerHTML = "";
-if (currentGame === games.euro) {
-
-    const euroDiv = document.getElementById("euroNumbers");
-
-    euroDiv.innerHTML = "";
-
-    euroNumbers.forEach(number => {
-
-        euroDiv.innerHTML += `
-            <div class="ball">
-                ⭐ ${String(number).padStart(2, "0")}
-            </div>
-        `;
-
-    });
-
-}
-   if (currentGame === games.extra) {
-
-    const extraDiv = document.getElementById("extraNumber");
-
-    extraDiv.innerHTML = "";
-
-    extraNumber.forEach(number => {
-
-        extraDiv.innerHTML += `
-            <div class="ball">
-                ⭐ ${number}
-            </div>
-        `;
-
-    });
-
-} numbers.forEach(number=>{
-
+    numbers.forEach(number => {
         numbersDiv.innerHTML += `
-
             <div class="ball">
-
-                ${String(number).padStart(2,"0")}
-
+                ${String(number).padStart(2, "0")}
             </div>
-
         `;
-        
+    });
 
-    const stats = document.getElementById("stats");
+    if (currentGame === games.euro) {
+        const euroDiv = document.getElementById("euroNumbers");
+        euroDiv.innerHTML = "";
 
-const suma = numbers.reduce((a,b)=>a+b,0);
-
-const parzyste = numbers.filter(n => n % 2 === 0).length;
-
-const nieparzyste = currentGame.count - parzyste;
-let ranges = new Array(currentGame.ranges.length).fill(0);
-
-numbers.forEach(n => {
-
-    for(let i = 0; i < currentGame.ranges.length; i++){
-
-        if(n <= currentGame.ranges[i]){
-            ranges[i]++;
-            break;
-        }
-
+        euroNumbers.forEach(number => {
+            euroDiv.innerHTML += `
+                <div class="ball">
+                    ⭐ ${String(number).padStart(2, "0")}
+                </div>
+            `;
+        });
     }
 
-});
+    if (currentGame === games.extra) {
+        const extraDiv = document.getElementById("extraNumber");
+        extraDiv.innerHTML = "";
 
-stats.innerHTML = `
+        extraNumber.forEach(number => {
+            extraDiv.innerHTML += `
+                <div class="ball">
+                    ⭐ ${number}
+                </div>
+            `;
+        });
+    }
 
-<div class="stats-card">
+    const stats = document.getElementById("stats");
+    const parzyste = numbers.filter(n => n % 2 === 0).length;
+    const nieparzyste = currentGame.count - parzyste;
+    const ranges = new Array(currentGame.ranges.length).fill(0);
 
-<h2>📊 Statystyki kuponu</h2>
+    numbers.forEach(n => {
+        for (let i = 0; i < currentGame.ranges.length; i++) {
+            if (n <= currentGame.ranges[i]) {
+                ranges[i]++;
+                break;
+            }
+        }
+    });
 
-<div class="stat">
+    stats.innerHTML = `
+        <div class="stats-card">
+            <h2>📊 Statystyki kuponu</h2>
 
-<span>Suma</span>
+            <div class="stat">
+                <span>Suma</span>
+                <strong>${suma}</strong>
+            </div>
 
-<strong>${suma}</strong>
+            <div class="stat">
+                <span>Parzyste</span>
+                <strong>${parzyste}</strong>
+            </div>
 
-</div>
+            <div class="stat">
+                <span>Nieparzyste</span>
+                <strong>${nieparzyste}</strong>
+            </div>
 
-<div class="stat">
+            <div class="structure">
+                ${currentGame.ranges.map((value, index) => {
+                    const start = index === 0
+                        ? 1
+                        : currentGame.ranges[index - 1] + 1;
 
-<span>Parzyste</span>
+                    return `
+                        <div class="stat">
+                            <span>${start}-${value}</span>
+                            <strong>${ranges[index]}</strong>
+                        </div>
+                    `;
+                }).join("")}
 
-<strong>${parzyste}</strong>
+                <div class="stat">
+                    <span>Struktura</span>
+                    <strong>${ranges.join("-")}</strong>
+                </div>
+            </div>
+        </div>
+    `;
 
-</div>
-
-<div class="stat">
-
-<span>Nieparzyste</span>
-
-<strong>${nieparzyste}</strong>
-
-</div>
-
-<div class="structure">
-
-${currentGame.ranges.map((value,index)=>{
-
-    const start = index===0
-        ? 1
-        : currentGame.ranges[index-1]+1;
-
-    return `
-
-<div class="stat">
-
-<span>${start}-${value}</span>
-
-<strong>${ranges[index]}</strong>
-
-</div>
-
-`;
-
-}).join("")}
-
-<div class="stat">
-
-<span>Struktura</span>
-
-<strong>${ranges.join("-")}</strong>
-
-</div>
-
-</div>
-
-</div>
-
-`;});
+    if (autoForgePlan) {
+        const hotSet = new Set(autoForgePlan.hotPool);
+        autoForgePlan.lastSelectedHotNumbers = numbers.filter(number => hotSet.has(number));
+        autoForgePlan.lastColdPoolUsed = autoColdPool;
+    }
 
     autoForgeSecondaryOverride = null;
-
-}function generateNumbers(count, max){
+    return numbers;
+}
+function generateNumbers(count, max){
 if (currentGame === games.multi) {
 
     const selected = Number(document.getElementById("multiCount").value);
@@ -1640,6 +3034,182 @@ for (let i = 0; i < currentGame.ranges.length; i++) {
 
     return even === wantedEven && odd === wantedOdd;
 }
+
+function getStatsPatternConfig() {
+    if (currentGame === games.multi) {
+        return {
+            pair: { limit: 10, maxWindow: 100 },
+            triple: { limit: 10, maxWindow: 50 },
+            quad: { limit: 8, maxWindow: 30 },
+            returnLimit: 12
+        };
+    }
+
+    if (currentGame === games.lotto) {
+        return {
+            pair: { limit: 10, maxWindow: 200 },
+            triple: { limit: 8, maxWindow: 120 },
+            quad: { limit: 6, maxWindow: 60 },
+            returnLimit: 10
+        };
+    }
+
+    // Mini Lotto, EuroJackpot i Extra Pensja mają mniejsze losowania główne,
+    // więc możemy bezpiecznie analizować nieco dłuższe okno kombinacji.
+    return {
+        pair: { limit: 10, maxWindow: 250 },
+        triple: { limit: 8, maxWindow: 150 },
+        quad: { limit: 5, maxWindow: 80 },
+        returnLimit: 10
+    };
+}
+
+function buildStatsCombinationRanking(draws, size, limit, maxWindow) {
+    const source = Array.isArray(draws) ? draws : [];
+    const windowSize = Math.min(source.length, maxWindow);
+    const sample = source.slice(-windowSize);
+    const counts = new Map();
+
+    sample.forEach(draw => {
+        const numbers = getValidDrawNumbers(draw);
+        forEachCombination(numbers, size, combo => {
+            const key = getCombinationKey(combo);
+            counts.set(key, (counts.get(key) || 0) + 1);
+        });
+    });
+
+    const allEntries = [...counts.entries()]
+        .map(([key, count]) => ({
+            numbers: key.split('|').map(Number),
+            count,
+            share: windowSize ? count / windowSize : 0
+        }))
+        .filter(item => item.count >= 2)
+        .sort((a, b) =>
+            b.count - a.count ||
+            b.share - a.share ||
+            a.numbers.join('-').localeCompare(b.numbers.join('-'))
+        );
+
+    return {
+        windowSize,
+        sourceWindow: source.length,
+        limited: source.length > windowSize,
+        entries: allEntries.slice(0, limit),
+        repeatedCount: allEntries.length
+    };
+}
+
+function buildStatsReturnAnalysis(draws, limit = 10) {
+    const sample = (Array.isArray(draws) ? draws : [])
+        .map(draw => ({
+            draw,
+            numbers: getValidDrawNumbers(draw)
+        }))
+        .filter(item => item.numbers.length > 0);
+
+    const opportunities = new Array(currentGame.max + 1).fill(0);
+    const returned = new Array(currentGame.max + 1).fill(0);
+    const distribution = new Map();
+
+    let overlapTotal = 0;
+    let transitionCount = 0;
+    let latestOverlapNumbers = [];
+    let latestFrom = null;
+    let latestTo = null;
+
+    for (let i = 0; i < sample.length - 1; i++) {
+        const previous = sample[i];
+        const next = sample[i + 1];
+        const nextSet = new Set(next.numbers);
+        const overlapNumbers = previous.numbers.filter(number => nextSet.has(number));
+
+        previous.numbers.forEach(number => {
+            opportunities[number]++;
+            if (nextSet.has(number)) returned[number]++;
+        });
+
+        const overlap = overlapNumbers.length;
+        distribution.set(overlap, (distribution.get(overlap) || 0) + 1);
+        overlapTotal += overlap;
+        transitionCount++;
+
+        if (i === sample.length - 2) {
+            latestOverlapNumbers = overlapNumbers;
+            latestFrom = previous.draw;
+            latestTo = next.draw;
+        }
+    }
+
+    const ranking = [];
+    for (let number = 1; number <= currentGame.max; number++) {
+        if (!opportunities[number]) continue;
+        ranking.push({
+            number,
+            returned: returned[number],
+            opportunities: opportunities[number],
+            rate: returned[number] / opportunities[number]
+        });
+    }
+
+    ranking.sort((a, b) =>
+        b.returned - a.returned ||
+        b.rate - a.rate ||
+        b.opportunities - a.opportunities ||
+        a.number - b.number
+    );
+
+    return {
+        transitionCount,
+        average: transitionCount ? overlapTotal / transitionCount : 0,
+        distribution: [...distribution.entries()]
+            .map(([count, occurrences]) => ({ count, occurrences }))
+            .sort((a, b) => a.count - b.count),
+        ranking: ranking.slice(0, limit),
+        latestOverlapNumbers,
+        latestFrom,
+        latestTo
+    };
+}
+
+function formatStatsPatternNumbers(numbers) {
+    return numbers
+        .map(number => String(number).padStart(2, '0'))
+        .join(' – ');
+}
+
+function renderStatsPatternBox(title, icon, stats) {
+    const windowLabel = stats.limited
+        ? `${stats.windowSize} z ${stats.sourceWindow} los.`
+        : `${stats.windowSize} los.`;
+
+    const rows = stats.entries.length
+        ? stats.entries.map(item => `
+            <div class="stats-pattern-row">
+                <span>${formatStatsPatternNumbers(item.numbers)}</span>
+                <strong>${item.count}× <small>${Math.round(item.share * 100)}%</small></strong>
+            </div>
+        `).join('')
+        : `
+            <div class="stats-pattern-empty">
+                <span>Brak powtarzających się układów</span>
+                <strong>—</strong>
+            </div>
+        `;
+
+    return `
+        <div class="statsBox stats-pattern-box">
+            <h3>${icon} ${title} <small>${windowLabel}</small></h3>
+            ${rows}
+            ${stats.limited ? `
+                <p class="stats-pattern-note">
+                    Dłuższy zakres został skrócony dla tej statystyki, aby zachować nacisk na aktualne wzorce i płynność aplikacji.
+                </p>
+            ` : ''}
+        </div>
+    `;
+}
+
 function pokazStatystyki() {
 
     const statystyki = {};
@@ -1933,7 +3503,31 @@ const maxSredniOdstep =
 ranking.sort((a, b) => b.trafienia - a.trafienia);
 const activeHotColdCount = currentGame === games.multi ? hotColdCount : 5;
 const hot = ranking.slice(0, activeHotColdCount);
-const cold = [...ranking].reverse().slice(0, activeHotColdCount); 
+const cold = [...ranking].reverse().slice(0, activeHotColdCount);
+const latestDraw = getLatestImportedDraw();
+const statsPatternConfig = getStatsPatternConfig();
+const pairStats = buildStatsCombinationRanking(
+    analizowaneLosowania,
+    2,
+    statsPatternConfig.pair.limit,
+    statsPatternConfig.pair.maxWindow
+);
+const tripleStats = buildStatsCombinationRanking(
+    analizowaneLosowania,
+    3,
+    statsPatternConfig.triple.limit,
+    statsPatternConfig.triple.maxWindow
+);
+const quadStats = buildStatsCombinationRanking(
+    analizowaneLosowania,
+    4,
+    statsPatternConfig.quad.limit,
+    statsPatternConfig.quad.maxWindow
+);
+const returnStats = buildStatsReturnAnalysis(
+    analizowaneLosowania,
+    statsPatternConfig.returnLimit
+);
     let html = `
 <h2>📊 Statystyki ${currentGame.title}</h2>
 <div style="margin: 15px 0 25px 0;">
@@ -1966,6 +3560,29 @@ ${currentGame === games.multi ? `
 ` : ""}
 </div>
 <div class="statsSummary">
+<div class="statsBox latest-draw-stats-box">
+    <h3>✅ OSTATNIE LOSOWANIE</h3>
+
+    ${latestDraw ? `
+        <div>
+            <span>Data</span>
+            <strong>${latestDraw.data}</strong>
+        </div>
+        <div>
+            <span>Nr</span>
+            <strong>${latestDraw.numer}</strong>
+        </div>
+        <div class="latest-draw-stats-numbers">
+            <span>Liczby</span>
+            <strong>${formatLatestDrawNumbers(latestDraw)}</strong>
+        </div>
+    ` : `
+        <div>
+            <span>Status</span>
+            <strong>Brak danych</strong>
+        </div>
+    `}
+</div>
 <div class="statsBox">
     <h3>🧩 TOP STRUKTURY</h3>
 
@@ -2137,6 +3754,91 @@ ${cold.map(x => `
 </div>
 
 </div>
+
+${renderStatsPatternBox("TOP PARY", "🔗", pairStats)}
+${renderStatsPatternBox("TOP TRÓJKI", "🔺", tripleStats)}
+${renderStatsPatternBox("TOP CZWÓRKI", "◼️", quadStats)}
+
+<section class="stats-return-panel">
+    <div class="stats-return-head">
+        <div>
+            <span>🔁 POWROTY Z LOSOWANIA DO LOSOWANIA</span>
+            <strong>${returnStats.transitionCount} przejść w wybranym oknie</strong>
+        </div>
+        <div class="stats-return-average">
+            <span>Średnio wraca</span>
+            <strong>${returnStats.average.toFixed(2)} liczby</strong>
+        </div>
+    </div>
+
+    <div class="stats-return-grid">
+        <div class="stats-return-block">
+            <h4>Rozkład liczby powrotów</h4>
+            <div class="stats-return-distribution">
+                ${returnStats.distribution.length ? returnStats.distribution.map(item => `
+                    <div>
+                        <span>${item.count} ${item.count === 1 ? "liczba" : "liczb"}</span>
+                        <strong>${item.occurrences}×</strong>
+                    </div>
+                `).join("") : `
+                    <div><span>Za mało losowań</span><strong>—</strong></div>
+                `}
+            </div>
+        </div>
+
+        <div class="stats-return-block">
+            <h4>Ostatnie przejście</h4>
+            ${returnStats.latestFrom && returnStats.latestTo ? `
+                <div class="stats-return-latest-meta">
+                    <span>${returnStats.latestFrom.data || "—"}</span>
+                    <strong>→</strong>
+                    <span>${returnStats.latestTo.data || "—"}</span>
+                </div>
+                <div class="stats-return-latest-numbers">
+                    <span>Wróciło ${returnStats.latestOverlapNumbers.length}:</span>
+                    <strong>${returnStats.latestOverlapNumbers.length
+                        ? returnStats.latestOverlapNumbers.map(n => String(n).padStart(2, "0")).join(", ")
+                        : "brak"}</strong>
+                </div>
+            ` : `
+                <div class="stats-return-latest-numbers">
+                    <span>Brak danych do porównania dwóch losowań.</span>
+                </div>
+            `}
+        </div>
+    </div>
+
+    <div class="stats-return-table-wrap">
+        <table class="statsTable stats-return-table">
+            <thead>
+                <tr>
+                    <th>Liczba</th>
+                    <th>Powroty</th>
+                    <th>Okazje do powrotu</th>
+                    <th>Współczynnik</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${returnStats.ranking.length ? returnStats.ranking.map(item => `
+                    <tr>
+                        <td><strong>${item.number}</strong></td>
+                        <td>${item.returned}</td>
+                        <td>${item.opportunities}</td>
+                        <td>${Math.round(item.rate * 100)}%</td>
+                    </tr>
+                `).join("") : `
+                    <tr>
+                        <td colspan="4">Za mało danych do policzenia powrotów.</td>
+                    </tr>
+                `}
+            </tbody>
+        </table>
+    </div>
+
+    <p class="stats-return-note">
+        Powrót oznacza, że liczba wystąpiła w jednym losowaniu i pojawiła się ponownie w bezpośrednio następnym losowaniu. Współczynnik pokazuje historyczny udział takich powrotów w wybranym oknie.
+    </p>
+</section>
 
 </div>
 
