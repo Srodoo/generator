@@ -3210,6 +3210,447 @@ function renderStatsPatternBox(title, icon, stats) {
     `;
 }
 
+
+function buildStatsPulseSnapshot(draws, windowSize) {
+    const source = Array.isArray(draws) ? draws : [];
+    const sample = source
+        .slice(-Math.min(windowSize, source.length))
+        .filter(draw => getValidDrawNumbers(draw).length > 0);
+
+    if (sample.length < 2) return null;
+
+    const analysis = analyzeAutoForgeWindow(source, windowSize);
+    const bands = getAutoForgeBands();
+    const thresholds = getClusterThresholds();
+
+    const bandStats = bands.map((band, index) => {
+        const capacity = band.end - band.start + 1;
+        const capacityShare = capacity / currentGame.max;
+        const share = analysis.bandShares[index] || 0;
+        return {
+            ...band,
+            share,
+            intensity: capacityShare > 0 ? share / capacityShare : 0
+        };
+    });
+
+    const bandRanking = [...bandStats].sort(
+        (a, b) => b.intensity - a.intensity || b.share - a.share
+    );
+    const dominantBand = bandRanking[0];
+
+    const centers = sample.map(draw => {
+        const nums = getValidDrawNumbers(draw);
+        return nums.length ? average(nums) : 0;
+    }).filter(Boolean);
+
+    const split = Math.max(1, Math.floor(centers.length / 2));
+    const older = centers.slice(0, split);
+    const newer = centers.slice(split);
+    const olderCenter = average(older);
+    const newerCenter = newer.length ? average(newer) : olderCenter;
+    const migrationDelta = newerCenter - olderCenter;
+    const migrationThreshold = Math.max(0.6, currentGame.max * 0.01);
+    const direction = migrationDelta > migrationThreshold
+        ? 1
+        : migrationDelta < -migrationThreshold
+            ? -1
+            : 0;
+
+    let focusKeys;
+    if (direction > 0) {
+        focusKeys = ["MID", "HIGH"];
+    } else if (direction < 0) {
+        focusKeys = ["LOW", "MID"];
+    } else if (dominantBand?.key === "HIGH") {
+        focusKeys = ["MID", "HIGH"];
+    } else if (dominantBand?.key === "LOW") {
+        focusKeys = ["LOW", "MID"];
+    } else {
+        const low = bandStats.find(x => x.key === "LOW");
+        const high = bandStats.find(x => x.key === "HIGH");
+        focusKeys = (high?.intensity || 0) >= (low?.intensity || 0)
+            ? ["MID", "HIGH"]
+            : ["LOW", "MID"];
+    }
+
+    const focusShare = bandStats
+        .filter(band => focusKeys.includes(band.key))
+        .reduce((sum, band) => sum + band.share, 0);
+
+    const migrationStrength = clamp(
+        Math.abs(migrationDelta) / Math.max(1, currentGame.max * 0.06),
+        0,
+        1
+    );
+
+    const sectorScores = analysis.sectorAverageCounts.map((avgCount, index) => {
+        const bounds = getSectorBounds(index);
+        const midpoint = (bounds.start + bounds.end) / 2;
+        const position = ((midpoint - 1) / Math.max(1, currentGame.max - 1)) * 2 - 1;
+        const migrationFactor = Math.max(
+            0.60,
+            1 + direction * position * migrationStrength * 0.32
+        );
+        const clusterFactor =
+            1 +
+            (analysis.sectorClusterRates[index] || 0) * 0.80 +
+            (analysis.sectorStrongClusterRates[index] || 0) * 1.00;
+
+        return Math.max(0.001, avgCount || 0) * clusterFactor * migrationFactor;
+    });
+
+    const topSectorIndex = sectorScores
+        .map((score, index) => ({ score, index }))
+        .sort((a, b) => b.score - a.score)[0]?.index ?? 0;
+
+    const clusterHits = Math.round(
+        (analysis.sectorClusterRates[topSectorIndex] || 0) * sample.length
+    );
+    const strongHits = Math.round(
+        (analysis.sectorStrongClusterRates[topSectorIndex] || 0) * sample.length
+    );
+
+    return {
+        requestedWindow: windowSize,
+        windowSize: sample.length,
+        direction,
+        migrationDelta,
+        directionLabel: direction > 0 ? "↑ W GÓRĘ" : direction < 0 ? "↓ W DÓŁ" : "→ STABILNIE",
+        dominantBand: dominantBand?.key || "—",
+        dominantBandShare: dominantBand?.share || 0,
+        focusZone: focusKeys.join("/"),
+        focusShare,
+        topSectorIndex,
+        topSectorLabel: getSectorLabel(topSectorIndex),
+        topSectorAverage: analysis.sectorAverageCounts[topSectorIndex] || 0,
+        clusterHits,
+        strongHits,
+        maxCluster: analysis.sectorMax[topSectorIndex] || 0,
+        clusterThreshold: thresholds.cluster,
+        strongThreshold: thresholds.strong
+    };
+}
+
+function buildStatsShortPulse(draws) {
+    const windows = [2, 3, 4, 5];
+    const snapshots = windows
+        .map(windowSize => buildStatsPulseSnapshot(draws, windowSize))
+        .filter(Boolean);
+
+    if (!snapshots.length) {
+        return {
+            snapshots: [],
+            verdict: "ZA MAŁO DANYCH",
+            verdictClass: "low",
+            agreement: 0,
+            direction: 0,
+            focusZone: "—",
+            topSector: "—",
+            summary: "Wczytaj co najmniej 2 poprawne losowania, aby policzyć puls 2/3/4/5."
+        };
+    }
+
+    const pickMode = values => {
+        const counts = new Map();
+        values.forEach(value => counts.set(value, (counts.get(value) || 0) + 1));
+        return [...counts.entries()]
+            .sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0])))[0];
+    };
+
+    const directionMode = pickMode(snapshots.map(item => item.direction));
+    const focusMode = pickMode(snapshots.map(item => item.focusZone));
+    const sectorMode = pickMode(snapshots.map(item => item.topSectorLabel));
+
+    const directionShare = directionMode[1] / snapshots.length;
+    const focusShare = focusMode[1] / snapshots.length;
+    const sectorShare = sectorMode[1] / snapshots.length;
+    const agreement = Math.round(
+        clamp(directionShare * 0.40 + focusShare * 0.38 + sectorShare * 0.22, 0, 1) * 100
+    );
+
+    const direction = Number(directionMode[0]);
+    let verdict;
+    if (agreement >= 78 && direction > 0) {
+        verdict = "SILNY PULS W GÓRĘ";
+    } else if (agreement >= 78 && direction < 0) {
+        verdict = "SILNY PULS W DÓŁ";
+    } else if (agreement >= 74 && direction === 0) {
+        verdict = "STABILNY PULS";
+    } else if (agreement >= 64 && direction > 0) {
+        verdict = "PULS LEKKO W GÓRĘ";
+    } else if (agreement >= 64 && direction < 0) {
+        verdict = "PULS LEKKO W DÓŁ";
+    } else {
+        verdict = "PULS MIESZANY";
+    }
+
+    const verdictClass = agreement >= 78 ? "high" : agreement >= 62 ? "medium" : "low";
+    const averageFocusShare = average(snapshots.map(item => item.focusShare));
+
+    return {
+        snapshots,
+        verdict,
+        verdictClass,
+        agreement,
+        direction,
+        focusZone: focusMode[0],
+        focusVotes: focusMode[1],
+        topSector: sectorMode[0],
+        sectorVotes: sectorMode[1],
+        averageFocusShare,
+        summary:
+            `${focusMode[1]}/${snapshots.length} krótkie okna wskazują ${focusMode[0]}, ` +
+            `${sectorMode[1]}/${snapshots.length} mają najmocniejszy sektor ${sectorMode[0]}.`
+    };
+}
+
+function buildStatsClusterContinuity(draws, maxDraws = 5) {
+    const sample = (Array.isArray(draws) ? draws : [])
+        .slice(-Math.min(maxDraws, draws.length))
+        .filter(draw => getValidDrawNumbers(draw).length > 0);
+    const thresholds = getClusterThresholds();
+
+    const rows = currentGame.ranges.map((_, sectorIndex) => {
+        const bounds = getSectorBounds(sectorIndex);
+        const counts = sample.map(draw =>
+            getValidDrawNumbers(draw).filter(
+                number => number >= bounds.start && number <= bounds.end
+            ).length
+        );
+
+        const clusterHits = counts.filter(count => count >= thresholds.cluster).length;
+        const strongHits = counts.filter(count => count >= thresholds.strong).length;
+        let currentStreak = 0;
+        for (let i = counts.length - 1; i >= 0; i--) {
+            if (counts[i] >= thresholds.cluster) currentStreak++;
+            else break;
+        }
+
+        const avg = counts.length ? average(counts) : 0;
+        const max = counts.length ? Math.max(...counts) : 0;
+        const score = clusterHits * 2.2 + strongHits * 2.6 + currentStreak * 1.7 + avg;
+
+        let status = "spokojny";
+        if (currentStreak >= 2) status = "🔥 utrzymuje skupisko";
+        else if (strongHits >= 2) status = "🔥 silny";
+        else if (clusterHits >= Math.max(2, Math.ceil(sample.length * 0.5))) status = "aktywny";
+        else if (max >= thresholds.strong) status = "pojedyncze uderzenie";
+
+        return {
+            sectorIndex,
+            label: getSectorLabel(sectorIndex),
+            counts,
+            clusterHits,
+            strongHits,
+            currentStreak,
+            avg,
+            max,
+            score,
+            status
+        };
+    });
+
+    rows.sort((a, b) =>
+        b.score - a.score ||
+        b.currentStreak - a.currentStreak ||
+        b.clusterHits - a.clusterHits ||
+        b.avg - a.avg
+    );
+
+    return {
+        windowSize: sample.length,
+        thresholds,
+        rows: rows.slice(0, currentGame === games.multi ? 6 : rows.length)
+    };
+}
+
+function buildStatsSectorMigration(draws, maxDraws = 5) {
+    const sample = (Array.isArray(draws) ? draws : [])
+        .slice(-Math.min(maxDraws, draws.length))
+        .filter(draw => getValidDrawNumbers(draw).length > 0);
+
+    const points = sample.map(draw => {
+        const numbers = getValidDrawNumbers(draw);
+        const counts = new Array(currentGame.ranges.length).fill(0);
+        numbers.forEach(number => counts[getSectorIndex(number)]++);
+        const maxCount = Math.max(...counts, 0);
+        const candidates = counts
+            .map((count, index) => ({ count, index }))
+            .filter(item => item.count === maxCount);
+        const center = numbers.length ? average(numbers) : 0;
+        const chosen = [...candidates].sort((a, b) => {
+            const aBounds = getSectorBounds(a.index);
+            const bBounds = getSectorBounds(b.index);
+            const aMid = (aBounds.start + aBounds.end) / 2;
+            const bMid = (bBounds.start + bBounds.end) / 2;
+            return Math.abs(aMid - center) - Math.abs(bMid - center);
+        })[0] || { index: 0, count: 0 };
+
+        return {
+            date: draw.data || "—",
+            index: chosen.index,
+            label: getSectorLabel(chosen.index),
+            count: chosen.count
+        };
+    });
+
+    let up = 0;
+    let down = 0;
+    let stable = 0;
+    for (let i = 1; i < points.length; i++) {
+        const diff = points[i].index - points[i - 1].index;
+        if (diff > 0) up++;
+        else if (diff < 0) down++;
+        else stable++;
+    }
+
+    const net = points.length >= 2
+        ? points[points.length - 1].index - points[0].index
+        : 0;
+    const directionText = net > 0
+        ? `↑ ${Math.abs(net)} ${Math.abs(net) === 1 ? "sektor" : "sektory"} w górę`
+        : net < 0
+            ? `↓ ${Math.abs(net)} ${Math.abs(net) === 1 ? "sektor" : "sektory"} w dół`
+            : "→ bez zmiany netto";
+
+    return {
+        points,
+        up,
+        down,
+        stable,
+        net,
+        directionText
+    };
+}
+
+function renderStatsPulsePanel(pulse, continuity, migration) {
+    const snapshotCards = pulse.snapshots.length
+        ? pulse.snapshots.map(item => `
+            <div class="stats-pulse-window-card">
+                <div class="stats-pulse-window-head">
+                    <strong>${item.requestedWindow}</strong>
+                    <span>${item.directionLabel}</span>
+                </div>
+                <div class="stats-pulse-window-row">
+                    <span>Strefa</span>
+                    <strong>${item.focusZone} • ${Math.round(item.focusShare * 100)}%</strong>
+                </div>
+                <div class="stats-pulse-window-row">
+                    <span>Dominacja</span>
+                    <strong>${item.dominantBand} • ${Math.round(item.dominantBandShare * 100)}%</strong>
+                </div>
+                <div class="stats-pulse-window-row">
+                    <span>TOP sektor</span>
+                    <strong>${item.topSectorLabel}</strong>
+                </div>
+                <div class="stats-pulse-window-row">
+                    <span>Skupisko</span>
+                    <strong>${item.clusterHits}/${item.windowSize} • max ${item.maxCluster}</strong>
+                </div>
+            </div>
+        `).join("")
+        : `<div class="stats-pulse-empty">Za mało danych do policzenia pulsu 2/3/4/5.</div>`;
+
+    const continuityRows = continuity.rows.length
+        ? continuity.rows.map(item => `
+            <tr>
+                <td><strong>${item.label}</strong></td>
+                <td>${item.counts.join(" → ") || "—"}</td>
+                <td>${item.clusterHits}/${continuity.windowSize}</td>
+                <td>${item.strongHits}/${continuity.windowSize}</td>
+                <td>${item.currentStreak}</td>
+                <td><span class="stats-cluster-status">${item.status}</span></td>
+            </tr>
+        `).join("")
+        : `<tr><td colspan="6">Za mało danych do analizy skupisk.</td></tr>`;
+
+    const migrationTimeline = migration.points.length
+        ? migration.points.map((point, index) => `
+            <div class="stats-sector-migration-point">
+                <small>${point.date}</small>
+                <strong>${point.label}</strong>
+                <span>${point.count} kul</span>
+                ${index < migration.points.length - 1 ? `<i>→</i>` : ""}
+            </div>
+        `).join("")
+        : `<div class="stats-pulse-empty">Za mało danych do migracji sektorowej.</div>`;
+
+    return `
+        <section class="stats-pulse-panel">
+            <div class="stats-pulse-head">
+                <div>
+                    <span>💓 PULS PLANSZY • 2 / 3 / 4 / 5</span>
+                    <strong>${pulse.verdict}</strong>
+                    <small>Stały krótki odczyt niezależny od głównego zakresu statystyk.</small>
+                </div>
+                <div class="stats-pulse-score ${pulse.verdictClass}">
+                    <span>Spójność pulsu</span>
+                    <strong>${pulse.agreement}/100</strong>
+                </div>
+            </div>
+
+            <div class="stats-pulse-consensus">
+                <div><span>Wspólna strefa</span><strong>${pulse.focusZone}</strong></div>
+                <div><span>Średni udział strefy</span><strong>${Math.round((pulse.averageFocusShare || 0) * 100)}%</strong></div>
+                <div><span>Najczęstszy TOP sektor</span><strong>${pulse.topSector}</strong></div>
+                <div><span>Werdykt</span><strong>${pulse.summary}</strong></div>
+            </div>
+
+            <div class="stats-pulse-window-grid">
+                ${snapshotCards}
+            </div>
+
+            <div class="stats-pulse-subsection">
+                <div class="stats-pulse-subhead">
+                    <div>
+                        <span>🔥 CIĄGŁOŚĆ SKUPISK</span>
+                        <strong>Ostatnie ${continuity.windowSize} losowań</strong>
+                    </div>
+                    <small>
+                        Skupisko = ${continuity.thresholds.cluster}+ kul w sektorze, silne = ${continuity.thresholds.strong}+.
+                    </small>
+                </div>
+                <div class="stats-pulse-table-wrap">
+                    <table class="statsTable stats-pulse-table">
+                        <thead>
+                            <tr>
+                                <th>Sektor</th>
+                                <th>Obsada losowanie po losowaniu</th>
+                                <th>${continuity.thresholds.cluster}+</th>
+                                <th>${continuity.thresholds.strong}+</th>
+                                <th>Seria teraz</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>${continuityRows}</tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="stats-pulse-subsection">
+                <div class="stats-pulse-subhead">
+                    <div>
+                        <span>🧭 MIGRACJA SEKTOROWA</span>
+                        <strong>${migration.directionText}</strong>
+                    </div>
+                    <small>Pokazuje dominujący sektor kolejnych krótkich losowań: skąd → dokąd przesuwa się koncentracja.</small>
+                </div>
+                <div class="stats-sector-migration-timeline">
+                    ${migrationTimeline}
+                </div>
+                ${migration.points.length >= 2 ? `
+                    <div class="stats-sector-migration-summary">
+                        <span>Ruchy w górę <strong>${migration.up}</strong></span>
+                        <span>Ruchy w dół <strong>${migration.down}</strong></span>
+                        <span>Bez zmiany <strong>${migration.stable}</strong></span>
+                    </div>
+                ` : ""}
+            </div>
+        </section>
+    `;
+}
+
 function pokazStatystyki() {
 
     const statystyki = {};
@@ -3528,6 +3969,9 @@ const returnStats = buildStatsReturnAnalysis(
     analizowaneLosowania,
     statsPatternConfig.returnLimit
 );
+const shortPulse = buildStatsShortPulse(getCurrentGameDraws());
+const clusterContinuity = buildStatsClusterContinuity(getCurrentGameDraws(), 5);
+const sectorMigration = buildStatsSectorMigration(getCurrentGameDraws(), 5);
     let html = `
 <h2>📊 Statystyki ${currentGame.title}</h2>
 <div style="margin: 15px 0 25px 0;">
@@ -3536,6 +3980,9 @@ const returnStats = buildStatsReturnAnalysis(
     </label>
 
     <select id="analysisWindowSelect">
+    <option value="2">2 losowania</option>
+    <option value="3">3 losowania</option>
+    <option value="4">4 losowania</option>
     <option value="5">5 losowań</option>
     <option value="10">10 losowań</option>
     <option value="20" selected>20 losowań</option>
@@ -3559,6 +4006,7 @@ ${currentGame === games.multi ? `
     </select>
 ` : ""}
 </div>
+${renderStatsPulsePanel(shortPulse, clusterContinuity, sectorMigration)}
 <div class="statsSummary">
 <div class="statsBox latest-draw-stats-box">
     <h3>✅ OSTATNIE LOSOWANIE</h3>

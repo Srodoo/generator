@@ -1288,3 +1288,320 @@ button,.primary-btn{border:0;border-radius:11px!important;padding:11px 16px!impo
     width:100%;
     min-width:0;
 }
+
+/* =========================================================
+   LOTTOFORGE — PULS PLANSZY 2 / 3 / 4 / 5
+   ========================================================= */
+.stats-pulse-panel{
+    width:100%;
+    margin:18px 0 24px;
+    padding:18px;
+    border:1px solid rgba(124,92,255,.30);
+    border-radius:18px;
+    background:radial-gradient(circle at 100% 0%,rgba(62,166,255,.10),transparent 30%),linear-gradient(145deg,rgba(22,29,45,.98),rgba(10,15,24,.98));
+    box-shadow:0 16px 38px rgba(0,0,0,.24);
+}
+
+.stats-pulse-head{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:16px;
+    flex-wrap:wrap;
+    padding-bottom:14px;
+    border-bottom:1px solid rgba(104,121,151,.14);
+}
+
+.stats-pulse-head > div:first-child{
+    display:flex;
+    flex-direction:column;
+    gap:5px;
+}
+
+.stats-pulse-head > div:first-child > span{
+    color:#b8aaff;
+    font-size:11px;
+    font-weight:900;
+    letter-spacing:.09em;
+}
+
+.stats-pulse-head > div:first-child > strong{
+    color:#f5f8ff;
+    font-size:20px;
+}
+
+.stats-pulse-head small{
+    color:#7f8da3;
+    font-size:11px;
+}
+
+.stats-pulse-score{
+    min-width:130px;
+    padding:10px 12px;
+    border-radius:12px;
+    background:#0d1420;
+    border:1px solid rgba(103,122,154,.22);
+    text-align:right;
+}
+
+.stats-pulse-score span{
+    display:block;
+    color:#7f8da3;
+    font-size:10px;
+    text-transform:uppercase;
+    letter-spacing:.06em;
+}
+
+.stats-pulse-score strong{
+    display:block;
+    margin-top:4px;
+    font-size:19px;
+}
+
+.stats-pulse-score.high{border-color:rgba(64,216,138,.42);color:#7ce6aa;}
+.stats-pulse-score.medium{border-color:rgba(247,198,92,.40);color:#f8d47b;}
+.stats-pulse-score.low{border-color:rgba(255,107,121,.38);color:#ff9aa3;}
+
+.stats-pulse-consensus{
+    display:grid;
+    grid-template-columns:repeat(4,minmax(0,1fr));
+    gap:10px;
+    margin-top:14px;
+}
+
+.stats-pulse-consensus > div{
+    min-width:0;
+    padding:11px 12px;
+    border-radius:11px;
+    background:#0d1420;
+    border:1px solid rgba(93,111,142,.15);
+}
+
+.stats-pulse-consensus span{
+    display:block;
+    color:#7f8da3;
+    font-size:9px;
+    text-transform:uppercase;
+    letter-spacing:.07em;
+}
+
+.stats-pulse-consensus strong{
+    display:block;
+    margin-top:5px;
+    color:#eef4ff;
+    font-size:12px;
+    line-height:1.45;
+}
+
+.stats-pulse-window-grid{
+    display:grid;
+    grid-template-columns:repeat(4,minmax(0,1fr));
+    gap:10px;
+    margin-top:14px;
+}
+
+.stats-pulse-window-card{
+    padding:12px;
+    border-radius:13px;
+    border:1px solid rgba(103,121,151,.17);
+    background:linear-gradient(180deg,rgba(16,23,36,.96),rgba(10,15,24,.96));
+}
+
+.stats-pulse-window-head{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    gap:8px;
+    padding-bottom:8px;
+    margin-bottom:6px;
+    border-bottom:1px solid rgba(93,109,136,.12);
+}
+
+.stats-pulse-window-head strong{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    width:28px;
+    height:28px;
+    border-radius:999px;
+    background:rgba(124,92,255,.14);
+    color:#c9bfff;
+    font-size:13px;
+}
+
+.stats-pulse-window-head span{
+    color:#dfe7f5;
+    font-size:10px;
+    font-weight:800;
+}
+
+.stats-pulse-window-row{
+    display:flex;
+    justify-content:space-between;
+    gap:8px;
+    padding:5px 0;
+}
+
+.stats-pulse-window-row span{
+    color:#77869b;
+    font-size:10px;
+}
+
+.stats-pulse-window-row strong{
+    color:#eef4ff;
+    font-size:10px;
+    text-align:right;
+}
+
+.stats-pulse-subsection{
+    margin-top:18px;
+    padding-top:16px;
+    border-top:1px solid rgba(103,121,151,.14);
+}
+
+.stats-pulse-subhead{
+    display:flex;
+    align-items:flex-end;
+    justify-content:space-between;
+    gap:12px;
+    flex-wrap:wrap;
+    margin-bottom:10px;
+}
+
+.stats-pulse-subhead > div{
+    display:flex;
+    flex-direction:column;
+    gap:4px;
+}
+
+.stats-pulse-subhead span{
+    color:#aebcff;
+    font-size:10px;
+    font-weight:900;
+    letter-spacing:.07em;
+}
+
+.stats-pulse-subhead strong{
+    color:#f1f5ff;
+    font-size:14px;
+}
+
+.stats-pulse-subhead small{
+    color:#79879b;
+    font-size:10px;
+    line-height:1.4;
+}
+
+.stats-pulse-table-wrap{
+    overflow-x:auto;
+    border-radius:12px;
+}
+
+.stats-pulse-table{
+    max-width:none!important;
+    min-width:760px;
+    margin:0!important;
+}
+
+.stats-pulse-table td:nth-child(2){
+    letter-spacing:.03em;
+    color:#cfd8e8;
+}
+
+.stats-cluster-status{
+    display:inline-block;
+    padding:4px 7px;
+    border-radius:999px;
+    background:rgba(124,92,255,.10);
+    border:1px solid rgba(124,92,255,.18);
+    color:#c8bcff;
+    font-size:10px;
+    white-space:nowrap;
+}
+
+.stats-sector-migration-timeline{
+    display:flex;
+    align-items:stretch;
+    gap:8px;
+    overflow-x:auto;
+    padding:2px 0 4px;
+}
+
+.stats-sector-migration-point{
+    position:relative;
+    flex:1 0 130px;
+    min-width:130px;
+    padding:10px;
+    border-radius:11px;
+    border:1px solid rgba(94,112,143,.16);
+    background:#0d1420;
+    display:flex;
+    flex-direction:column;
+    gap:4px;
+}
+
+.stats-sector-migration-point small{
+    color:#6f7e94;
+    font-size:9px;
+}
+
+.stats-sector-migration-point strong{
+    color:#eef4ff;
+    font-size:13px;
+}
+
+.stats-sector-migration-point span{
+    color:#8fa0b8;
+    font-size:10px;
+}
+
+.stats-sector-migration-point i{
+    position:absolute;
+    right:-10px;
+    top:50%;
+    transform:translateY(-50%);
+    z-index:2;
+    color:#6f78a6;
+    font-style:normal;
+    font-weight:900;
+}
+
+.stats-sector-migration-summary{
+    display:flex;
+    gap:8px;
+    flex-wrap:wrap;
+    margin-top:10px;
+}
+
+.stats-sector-migration-summary span{
+    padding:6px 8px;
+    border-radius:9px;
+    background:rgba(255,255,255,.025);
+    border:1px solid rgba(95,113,143,.13);
+    color:#8493a9;
+    font-size:10px;
+}
+
+.stats-sector-migration-summary strong{
+    color:#eef4ff;
+}
+
+.stats-pulse-empty{
+    padding:12px;
+    border-radius:10px;
+    background:#0d1420;
+    color:#7f8da3;
+    font-size:11px;
+}
+
+@media(max-width:1050px){
+    .stats-pulse-consensus{grid-template-columns:repeat(2,minmax(0,1fr));}
+    .stats-pulse-window-grid{grid-template-columns:repeat(2,minmax(0,1fr));}
+}
+
+@media(max-width:650px){
+    .stats-pulse-panel{padding:14px;}
+    .stats-pulse-consensus{grid-template-columns:1fr;}
+    .stats-pulse-window-grid{grid-template-columns:1fr;}
+    .stats-pulse-score{width:100%;text-align:left;}
+}
