@@ -1605,3 +1605,211 @@ button,.primary-btn{border:0;border-radius:11px!important;padding:11px 16px!impo
     .stats-pulse-window-grid{grid-template-columns:1fr;}
     .stats-pulse-score{width:100%;text-align:left;}
 }
+
+/* =========================================================
+   LottoForge 2026-09-05 — systemy + profile AUTO FORGE + porządek statystyk
+   ========================================================= */
+.system-options{
+    margin:16px 0 10px;
+    padding:14px 16px;
+    display:grid;
+    grid-template-columns:minmax(220px,1fr) minmax(220px,1fr);
+    gap:12px;
+    align-items:end;
+    background:linear-gradient(145deg,rgba(20,30,46,.96),rgba(12,18,29,.96));
+    border:1px solid rgba(78,178,255,.28);
+    border-radius:14px;
+}
+.system-options label{
+    display:block;
+    margin-bottom:7px;
+    font-weight:800;
+    color:#eaf3ff;
+}
+.system-options select{
+    width:100%;
+    min-height:42px;
+    padding:8px 10px;
+    border-radius:10px;
+    border:1px solid rgba(108,142,190,.32);
+    background:#111a29;
+    color:#eef5ff;
+}
+.system-info{
+    min-height:42px;
+    display:flex;
+    align-items:center;
+    padding:9px 12px;
+    border-radius:10px;
+    background:rgba(55,133,226,.10);
+    border:1px solid rgba(70,155,255,.18);
+    color:#aebdd2;
+}
+.system-info strong{color:#f3f7ff;margin-right:5px;}
+
+.auto-forge-profile-section{
+    background:linear-gradient(145deg,rgba(16,23,37,.92),rgba(11,17,28,.92));
+    border:1px solid rgba(126,101,255,.20);
+}
+.auto-forge-profile-grid{
+    display:grid;
+    grid-template-columns:repeat(3,minmax(0,1fr));
+    gap:12px;
+}
+.auto-forge-profile-card{
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+    min-height:215px;
+    padding:15px;
+    border-radius:14px;
+    background:linear-gradient(180deg,rgba(20,27,42,.97),rgba(13,19,30,.97));
+    border:1px solid rgba(112,126,154,.20);
+}
+.auto-forge-profile-card.profile-hot{border-color:rgba(255,171,66,.38);}
+.auto-forge-profile-card.profile-aggressive{border-color:rgba(255,91,110,.42);}
+.auto-forge-profile-head{
+    display:flex;
+    justify-content:space-between;
+    gap:10px;
+    align-items:center;
+}
+.auto-forge-profile-head strong{font-size:15px;color:#f5f7ff;}
+.auto-forge-profile-head span{
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    font-weight:900;
+    color:#c7d5ea;
+    background:#0d1420;
+    border:1px solid rgba(108,126,156,.22);
+    padding:5px 8px;
+    border-radius:8px;
+    white-space:nowrap;
+}
+.auto-forge-profile-bands{
+    font-size:12px;
+    font-weight:800;
+    letter-spacing:.04em;
+    color:#8fc8ff;
+}
+.auto-forge-profile-card p{
+    margin:0;
+    flex:1;
+    line-height:1.5;
+    color:#97a7bd;
+}
+.auto-forge-profile-generate{width:100%;margin-top:auto;}
+.profile-hot .auto-forge-profile-generate{
+    background:linear-gradient(135deg,#d98521,#bd5d21)!important;
+}
+.profile-aggressive .auto-forge-profile-generate{
+    background:linear-gradient(135deg,#d94c66,#8e3bd6)!important;
+}
+
+.stats-command-bar{
+    margin:14px 0 10px;
+    padding:14px;
+    border:1px solid rgba(99,129,176,.22);
+    border-radius:16px;
+    background:linear-gradient(145deg,rgba(20,28,43,.96),rgba(12,18,29,.97));
+    box-shadow:0 10px 28px rgba(0,0,0,.18);
+}
+.stats-command-bar > div:first-child{
+    display:flex;
+    flex-direction:column;
+    gap:3px;
+    margin-bottom:12px;
+}
+.stats-command-bar > div:first-child strong{font-size:16px;color:#f4f7ff;}
+.stats-command-bar > div:first-child span{font-size:12px;color:#8f9db2;}
+.stats-tabs{
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px;
+}
+.stats-tabs button{
+    border:1px solid rgba(108,129,161,.25);
+    background:#111927;
+    color:#aebbd0;
+    padding:9px 12px;
+    border-radius:10px;
+    cursor:pointer;
+    font-weight:750;
+    transition:.16s ease;
+}
+.stats-tabs button:hover{transform:translateY(-1px);color:#fff;border-color:rgba(113,155,221,.46);}
+.stats-tabs button.active{
+    color:#fff;
+    border-color:rgba(116,92,255,.62);
+    background:linear-gradient(135deg,rgba(112,82,239,.88),rgba(46,116,215,.88));
+    box-shadow:0 7px 20px rgba(72,82,210,.20);
+}
+.stats-window-controls{
+    margin:10px 0 18px;
+    padding:12px 14px;
+    border:1px solid rgba(100,119,153,.16);
+    border-radius:12px;
+    background:rgba(13,19,30,.72);
+}
+.stats-window-controls label{font-weight:750;color:#c8d3e4;}
+.stats-window-controls select{
+    margin-left:7px;
+    min-height:38px;
+    padding:6px 9px;
+    border-radius:8px;
+    background:#101827;
+    color:#eef4ff;
+    border:1px solid rgba(106,130,168,.28);
+}
+.stats-tab-section[hidden],
+.statsSummary > [hidden],
+.stats-number-ranking-panel[hidden]{display:none!important;}
+.stats-number-ranking-panel{
+    margin-top:14px;
+    padding:14px;
+    border-radius:14px;
+    border:1px solid rgba(103,123,157,.20);
+    background:linear-gradient(180deg,rgba(23,30,45,.92),rgba(15,20,31,.94));
+}
+.stats-number-ranking-panel h3{margin:0 0 12px;}
+
+@media(max-width:900px){
+    .auto-forge-profile-grid{grid-template-columns:1fr;}
+    .system-options{grid-template-columns:1fr;}
+}
+@media(max-width:620px){
+    .stats-tabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));}
+    .stats-tabs button{width:100%;}
+    .stats-window-controls select{margin:7px 0 0;width:100%;}
+}
+
+/* =========================================================
+   AUTO FORGE — DŁUGIE / WIELOWARIANTOWE OKNA ANALIZY
+   ========================================================= */
+.auto-forge-mode-hint{
+    margin-top:9px;
+    padding:9px 11px;
+    border-radius:10px;
+    background:rgba(62,166,255,.055);
+    border:1px solid rgba(62,166,255,.14);
+    color:#8fa2bb;
+    font-size:11px;
+    line-height:1.5;
+}
+
+.auto-forge-controls optgroup{
+    color:#aebbd0;
+    background:#0b1019;
+    font-weight:800;
+}
+
+.auto-forge-controls option{
+    color:#f5f7fb;
+    background:#0b1019;
+}
+
+.auto-forge-grid small{
+    color:#7f8da3;
+    font-size:10px;
+    line-height:1.35;
+    font-weight:600;
+}

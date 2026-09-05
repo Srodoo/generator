@@ -3,6 +3,8 @@ const games = {
         title: "🎲 Generator Mini Lotto",
         count: 5,
         max: 42,
+        systemMin: 5,
+        systemMax: 12,
         ranges: [10,20,30,40,42]
     },
 
@@ -10,6 +12,8 @@ const games = {
         title: "🎲 Generator Lotto",
         count: 6,
         max: 49,
+        systemMin: 6,
+        systemMax: 12,
         ranges: [10,20,30,40,49]
     },
 
@@ -76,6 +80,100 @@ let analysisWindow = 20;
 let hotColdCount = 5;
 let autoForgeMode = "auto";
 let autoForgeSecondaryOverride = null;
+
+// AUTO FORGE — profile okien analizy zależne od gry.
+// Pierwsze okno ma zwykle największą wagę, dzięki czemu długi profil
+// zachowuje kontakt z bieżącą sytuacją, ale dostaje stabilniejsze tło.
+const AUTO_FORGE_WINDOW_PRESETS = {
+    mini: [
+        { id: "auto", name: "⚡ Krótki", windows: [5, 10, 15], weights: [0.45, 0.35, 0.20], hint: "Najbardziej reaktywny profil — świeże sektory i szybkie zmiany." },
+        { id: "hybrid", name: "🔀 Hybryda", windows: [5, 20, 50], weights: [0.50, 0.30, 0.20], hint: "Łączy ostatnie losowania z szerszym tłem bez utraty świeżości." },
+        { id: "medium", name: "🎯 Średni", windows: [10, 30, 60], weights: [0.45, 0.35, 0.20], hint: "Sprawdza, czy bieżący układ utrzymuje się dłużej niż kilka losowań." },
+        { id: "long", name: "🧱 Długi", windows: [20, 50, 100], weights: [0.40, 0.35, 0.25], hint: "Mniej podatny na pojedynczy wyskok — mocniej premiuje trwałe strefy i sektory." },
+        { id: "macro", name: "🌊 Makro", windows: [50, 100, 200], weights: [0.40, 0.35, 0.25], hint: "Szerokie tło historyczne do porównania z aktualnym kierunkiem." }
+    ],
+    lotto: [
+        { id: "auto", name: "⚡ Krótki", windows: [5, 10, 15], weights: [0.45, 0.35, 0.20], hint: "Najbardziej reaktywny profil dla świeżego układu." },
+        { id: "hybrid", name: "🔀 Hybryda", windows: [5, 15, 30], weights: [0.50, 0.30, 0.20], hint: "Świeży impuls plus sprawdzenie, czy utrzymuje się w szerszym tle." },
+        { id: "medium", name: "🎯 Średni", windows: [10, 25, 50], weights: [0.45, 0.35, 0.20], hint: "Balans pomiędzy ostatnimi losowaniami i średnim okresem." },
+        { id: "long", name: "🧱 Długi", windows: [20, 50, 100], weights: [0.40, 0.35, 0.25], hint: "Stabilniejsze sektory, struktury i częstotliwości." },
+        { id: "macro", name: "🌊 Makro", windows: [50, 100, 200], weights: [0.40, 0.35, 0.25], hint: "Najszersze tło do kontroli, czy obecny profil nie jest tylko krótkim skokiem." }
+    ],
+    euro: [
+        { id: "auto", name: "⚡ Krótki", windows: [5, 10, 15], weights: [0.45, 0.35, 0.20], hint: "Najbardziej reaktywny profil dla świeżych zmian." },
+        { id: "hybrid", name: "🔀 Hybryda", windows: [5, 15, 30], weights: [0.50, 0.30, 0.20], hint: "Łączy ostatni impuls z krótszym i średnim tłem." },
+        { id: "medium", name: "🎯 Średni", windows: [10, 20, 40], weights: [0.45, 0.35, 0.20], hint: "Sprawdza, czy bieżące sektory utrzymują się w kilku oknach." },
+        { id: "long", name: "🧱 Długi", windows: [20, 40, 80], weights: [0.40, 0.35, 0.25], hint: "Dłuższy filtr z mniejszą wrażliwością na pojedyncze losowanie." },
+        { id: "macro", name: "🌊 Makro", windows: [40, 80, 150], weights: [0.40, 0.35, 0.25], hint: "Szerokie tło historyczne dla trendu, sektorów i migracji." }
+    ],
+    multi: [
+        { id: "auto", name: "⚡ Krótki", windows: [5, 10, 15], weights: [0.45, 0.35, 0.20], patternWindows: [5, 10, 15], patternWeights: [0.45, 0.35, 0.20], hint: "Szybki puls planszy — mocno reaguje na świeże skupiska." },
+        { id: "pulse", name: "🔥 Puls", windows: [10, 20, 30], weights: [0.45, 0.35, 0.20], patternWindows: [10, 20, 30], patternWeights: [0.45, 0.35, 0.20], hint: "Krótko-średni profil pod aktualne ogniska i serie skupisk." },
+        { id: "hybrid", name: "🔀 Hybryda", windows: [5, 20, 50], weights: [0.50, 0.30, 0.20], patternWindows: [5, 20, 30], patternWeights: [0.50, 0.30, 0.20], hint: "Łączy świeży impuls 5 losowań z tłem 20 i 50." },
+        { id: "medium", name: "🎯 Średni", windows: [20, 50, 100], weights: [0.45, 0.35, 0.20], patternWindows: [10, 20, 40], patternWeights: [0.45, 0.35, 0.20], hint: "Dobrze pokazuje, czy LOW/MID/HIGH i sektory trzymają kierunek." },
+        { id: "long", name: "🧱 Długi", windows: [50, 100, 200], weights: [0.40, 0.35, 0.25], patternWindows: [20, 30, 50], patternWeights: [0.40, 0.35, 0.25], hint: "Szuka trwałych ognisk i sektorów, nie tylko ostatniego wyskoku." },
+        { id: "macro", name: "🌊 Makro", windows: [100, 200, 300], weights: [0.40, 0.35, 0.25], patternWindows: [20, 40, 60], patternWeights: [0.40, 0.35, 0.25], hint: "Najszerszy obraz planszy. Relacje par/trójek/czwórek liczone są na krótszych oknach, żeby nie zamrozić przeglądarki." }
+    ],
+    extra: [
+        { id: "auto", name: "⚡ Krótki", windows: [5, 10, 15], weights: [0.45, 0.35, 0.20], hint: "Najbardziej reaktywny profil dla świeżego układu." },
+        { id: "hybrid", name: "🔀 Hybryda", windows: [5, 20, 50], weights: [0.50, 0.30, 0.20], hint: "Świeży impuls plus szersze tło." },
+        { id: "medium", name: "🎯 Średni", windows: [10, 30, 60], weights: [0.45, 0.35, 0.20], hint: "Balans między szybkością reakcji i stabilnością." },
+        { id: "long", name: "🧱 Długi", windows: [20, 50, 100], weights: [0.40, 0.35, 0.25], hint: "Mocniej premiuje utrzymujące się sektory i struktury." },
+        { id: "macro", name: "🌊 Makro", windows: [50, 100, 200], weights: [0.40, 0.35, 0.25], hint: "Szeroki filtr historyczny do kontroli aktualnego trendu." }
+    ]
+};
+
+const AUTO_FORGE_SINGLE_WINDOWS = {
+    mini: [5, 10, 20, 30, 50, 100, 200],
+    lotto: [5, 10, 20, 30, 50, 100, 200],
+    euro: [5, 10, 20, 40, 80, 150],
+    multi: [5, 10, 20, 30, 50, 100, 200, 300],
+    extra: [5, 10, 20, 30, 50, 100, 200]
+};
+
+function getAutoForgePresets() {
+    const gameKey = getCurrentGameKey();
+    return AUTO_FORGE_WINDOW_PRESETS[gameKey] || AUTO_FORGE_WINDOW_PRESETS.mini;
+}
+
+function getAutoForgePreset(mode = autoForgeMode) {
+    return getAutoForgePresets().find(preset => preset.id === mode) || null;
+}
+
+function renderAutoForgeModeOptions() {
+    const gameKey = getCurrentGameKey();
+    const presets = getAutoForgePresets();
+    const singles = AUTO_FORGE_SINGLE_WINDOWS[gameKey] || [5, 10, 20, 50, 100];
+
+    const presetOptions = presets.map(preset =>
+        `<option value="${preset.id}">${preset.name} — ${preset.windows.join(" / ")}</option>`
+    ).join("");
+
+    const singleOptions = singles.map(size =>
+        `<option value="single-${size}">Tylko ${size} ostatnich</option>`
+    ).join("");
+
+    return `
+        <optgroup label="Profile ważone">${presetOptions}</optgroup>
+        <optgroup label="Jedno okno">${singleOptions}</optgroup>
+    `;
+}
+
+function getAutoForgeModeHint(mode = autoForgeMode) {
+    if (String(mode).startsWith("single-")) {
+        const size = Number(String(mode).replace("single-", ""));
+        return `Jedno okno: ${size} ostatnich losowań • bez mieszania z innymi okresami.`;
+    }
+
+    const preset = getAutoForgePreset(mode) || getAutoForgePreset("auto");
+    if (!preset) return "";
+
+    const weightsText = preset.weights
+        .map(weight => `${Math.round(weight * 100)}%`)
+        .join(" / ");
+
+    return `${preset.hint} Wagi: ${weightsText}.`;
+}
 function getCurrentGameKey() {
 
     return Object.keys(games).find(
@@ -447,15 +545,34 @@ ${currentGame === games.multi ? `
 
 ` : ""}
 
+${isSystemGame() ? `
+<div class="system-options">
+    <div>
+        <label for="systemCount">🎟️ Tryb systemowy — ile liczb typować?</label>
+        <select id="systemCount">
+            ${Array.from(
+                { length: (currentGame.systemMax - currentGame.systemMin + 1) },
+                (_, index) => currentGame.systemMin + index
+            ).map(value => `
+                <option value="${value}" ${value === currentGame.count ? "selected" : ""}>
+                    ${value}${value === currentGame.count ? " — zwykły zakład" : " — system"}
+                </option>
+            `).join("")}
+        </select>
+    </div>
+    <div id="systemInfo" class="system-info"></div>
+</div>
+` : ""}
+
 <div class="auto-forge-controls">
     <div class="auto-forge-stage-badge">ETAP 4 • ANALIZA + SILNIK WYBORU</div>
-    <label for="autoForgeMode">Tryb analizy AUTO FORGE</label>
+    <label for="autoForgeMode">Horyzont analizy AUTO FORGE</label>
     <select id="autoForgeMode">
-        <option value="auto" selected>AUTO — 5 / 10 / 15</option>
-        <option value="5">Tylko 5 ostatnich</option>
-        <option value="10">Tylko 10 ostatnich</option>
-        <option value="15">Tylko 15 ostatnich</option>
+        ${renderAutoForgeModeOptions()}
     </select>
+    <div id="autoForgeModeHint" class="auto-forge-mode-hint">
+        ${getAutoForgeModeHint()}
+    </div>
 </div>
 
 <div class="generator-actions">
@@ -498,7 +615,7 @@ ${currentGame.ranges.map((value,index)=>{
     type="number"
     id="r${index+1}"
     min="0"
-    max="${currentGame.count}"
+    max="${getMaxTicketCount()}"
     value="0">
 
 `;
@@ -524,7 +641,7 @@ ${currentGame.ranges.map((value,index)=>{
 <input
     type="number"
     id="sumMin"
-    value="${getMinPossibleSum(currentGame.count)}"
+    value="${getMinPossibleSum(getGeneratorTargetCount())}"
     min="0">
 
 <br><br>
@@ -534,7 +651,7 @@ ${currentGame.ranges.map((value,index)=>{
 <input
     type="number"
     id="sumMax"
-    value="${getMaxPossibleSum(currentGame.count, currentGame.max)}"
+    value="${getMaxPossibleSum(getGeneratorTargetCount(), currentGame.max)}"
     min="0">
 <hr>
 
@@ -552,7 +669,7 @@ ${currentGame.ranges.map((value,index)=>{
     type="number"
     id="evenCount"
     min="0"
-    max="${currentGame === games.multi ? 10 : currentGame.count}"
+    max="${getMaxTicketCount()}"
     value="0">
 
 <br><br>
@@ -562,7 +679,7 @@ ${currentGame.ranges.map((value,index)=>{
     type="number"
     id="oddCount"
     min="0"
-    max="${currentGame === games.multi ? 10 : currentGame.count}"
+    max="${getMaxTicketCount()}"
     value="0">
 
 <h3>🚫 Wykluczone liczby</h3>
@@ -604,7 +721,7 @@ ${currentGame.ranges.map((value,index)=>{
     type="number"
     id="requiredCount"
     min="0"
-    max="${currentGame.count}"
+    max="${getMaxTicketCount()}"
     value="0">
     ${currentGame === games.euro ? `
 <br><br>
@@ -632,28 +749,38 @@ ${currentGame.ranges.map((value,index)=>{
     const autoForgeBtn = document.getElementById("autoForgeBtn");
 
     const autoForgeModeSelect = document.getElementById("autoForgeMode");
+    const autoForgeModeHint = document.getElementById("autoForgeModeHint");
+
+    const availableAutoModes = Array.from(autoForgeModeSelect.options).map(option => option.value);
+    if (!availableAutoModes.includes(autoForgeMode)) {
+        autoForgeMode = "auto";
+    }
+
     autoForgeModeSelect.value = autoForgeMode;
+    if (autoForgeModeHint) {
+        autoForgeModeHint.textContent = getAutoForgeModeHint(autoForgeMode);
+    }
+
     autoForgeModeSelect.addEventListener("change", () => {
         autoForgeMode = autoForgeModeSelect.value;
+        if (autoForgeModeHint) {
+            autoForgeModeHint.textContent = getAutoForgeModeHint(autoForgeMode);
+        }
     });
 
     generateBtn.addEventListener("click", generateMiniLotto);
     autoForgeBtn.addEventListener("click", runAutoForge);
     if (currentGame === games.multi) {
+        const multiCount = document.getElementById("multiCount");
+        multiCount.addEventListener("change", syncTicketCountControls);
+    }
 
-    const multiCount = document.getElementById("multiCount");
-    const sumMinInput = document.getElementById("sumMin");
-    const sumMaxInput = document.getElementById("sumMax");
+    if (isSystemGame()) {
+        const systemCount = document.getElementById("systemCount");
+        systemCount.addEventListener("change", syncTicketCountControls);
+    }
 
-    multiCount.addEventListener("change", () => {
-
-        const count = Number(multiCount.value);
-
-        sumMinInput.value = getMinPossibleSum(count);
-        sumMaxInput.value = getMaxPossibleSum(count, currentGame.max);
-    });
-}
-
+    syncTicketCountControls();
     renderLatestDrawStatus();
 }
 
@@ -673,11 +800,75 @@ function standardDeviation(values) {
     return Math.sqrt(variance);
 }
 
-function getAutoForgeTargetCount() {
+function isSystemGame() {
+    return currentGame === games.mini || currentGame === games.lotto;
+}
+
+function getMaxTicketCount() {
+    if (isSystemGame()) return currentGame.systemMax || currentGame.count;
+    if (currentGame === games.multi) return 10;
+    return currentGame.count;
+}
+
+function getGeneratorTargetCount() {
     if (currentGame === games.multi) {
         return Number(document.getElementById("multiCount")?.value || currentGame.count);
     }
+
+    if (isSystemGame()) {
+        return Number(document.getElementById("systemCount")?.value || currentGame.count);
+    }
+
     return currentGame.count;
+}
+
+function getAutoForgeTargetCount() {
+    return getGeneratorTargetCount();
+}
+
+function combinationCount(n, k) {
+    if (!Number.isInteger(n) || !Number.isInteger(k) || n < k || k < 0) return 0;
+    let result = 1;
+    for (let i = 1; i <= k; i++) {
+        result = result * (n - k + i) / i;
+    }
+    return Math.round(result);
+}
+
+function updateSystemInfo() {
+    const info = document.getElementById("systemInfo");
+    if (!info || !isSystemGame()) return;
+
+    const targetCount = getGeneratorTargetCount();
+    const baseCount = currentGame.count;
+    const combinations = combinationCount(targetCount, baseCount);
+
+    info.innerHTML = targetCount === baseCount
+        ? `<strong>Tryb zwykły:</strong> ${baseCount} liczb • 1 kombinacja`
+        : `<strong>System ${targetCount} liczb:</strong> ${combinations} kombinacji ${baseCount}/${baseCount}`;
+}
+
+function syncTicketCountControls() {
+    const targetCount = getGeneratorTargetCount();
+    const sumMinInput = document.getElementById("sumMin");
+    const sumMaxInput = document.getElementById("sumMax");
+
+    if (sumMinInput) sumMinInput.value = getMinPossibleSum(targetCount);
+    if (sumMaxInput) sumMaxInput.value = getMaxPossibleSum(targetCount, currentGame.max);
+
+    for (let i = 0; i < currentGame.ranges.length; i++) {
+        const input = document.getElementById(`r${i + 1}`);
+        if (input) input.max = String(Math.min(targetCount, getSectorBounds(i).capacity));
+    }
+
+    const evenInput = document.getElementById("evenCount");
+    const oddInput = document.getElementById("oddCount");
+    const requiredInput = document.getElementById("requiredCount");
+    if (evenInput) evenInput.max = String(targetCount);
+    if (oddInput) oddInput.max = String(targetCount);
+    if (requiredInput) requiredInput.max = String(targetCount);
+
+    updateSystemInfo();
 }
 
 function getSectorIndex(number) {
@@ -815,6 +1006,130 @@ function apportionScoreCounts(scores, totalCount, capacities = []) {
     return result;
 }
 
+function getStructureBandAllocation(structure) {
+    const bands = getAutoForgeBands();
+    const counts = new Array(bands.length).fill(0);
+
+    structure.forEach((quota, sectorIndex) => {
+        if (!quota) return;
+        const bounds = getSectorBounds(sectorIndex);
+        const midpoint = (bounds.start + bounds.end) / 2;
+        const bandIndex = getBandIndex(midpoint);
+        counts[bandIndex] += quota;
+    });
+
+    return bands.map((band, index) => ({
+        key: band.key,
+        label: band.label,
+        count: counts[index]
+    }));
+}
+
+function concentrateStructure(baseStructure, sectorScores, targetCount, level = "hot") {
+    const result = [...baseStructure];
+    const capacities = currentGame.ranges.map((_, index) => getSectorBounds(index).capacity);
+    const ranking = sectorScores
+        .map((score, index) => ({ score, index }))
+        .sort((a, b) => b.score - a.score || a.index - b.index);
+
+    if (!ranking.length) return result;
+
+    const receiverCount = currentGame === games.multi
+        ? (level === "aggressive" ? 2 : 3)
+        : (level === "aggressive" ? 2 : 2);
+    const receivers = ranking.slice(0, Math.min(receiverCount, ranking.length));
+    const receiverSet = new Set(receivers.map(item => item.index));
+
+    const moveCount = level === "aggressive"
+        ? Math.max(2, Math.round(targetCount * 0.30))
+        : Math.max(1, Math.round(targetCount * 0.17));
+
+    const maxPerReceiver = currentGame === games.multi
+        ? (level === "aggressive" ? Math.min(5, targetCount) : Math.min(4, targetCount))
+        : (level === "aggressive" ? Math.min(4, targetCount) : Math.min(3, targetCount));
+
+    let receiverCursor = 0;
+    for (let move = 0; move < moveCount; move++) {
+        const donors = ranking
+            .slice()
+            .reverse()
+            .filter(item => result[item.index] > 0 && !receiverSet.has(item.index));
+
+        // Jeśli cały kupon już siedzi w najmocniejszych sektorach, można jeszcze
+        // przesunąć jedną kulę z najsłabszego z nich do lidera, ale nie opróżniamy
+        // drugiego ogniska do zera.
+        if (!donors.length) {
+            donors.push(...ranking
+                .slice()
+                .reverse()
+                .filter(item => result[item.index] > 1 && item.index !== receivers[0]?.index));
+        }
+
+        let receiver = null;
+        for (let attempt = 0; attempt < receivers.length; attempt++) {
+            const candidate = receivers[(receiverCursor + attempt) % receivers.length];
+            if (
+                result[candidate.index] < capacities[candidate.index] &&
+                result[candidate.index] < maxPerReceiver
+            ) {
+                receiver = candidate;
+                receiverCursor = (receiverCursor + attempt + 1) % Math.max(1, receivers.length);
+                break;
+            }
+        }
+
+        const donor = donors.find(item => item.index !== receiver?.index);
+        if (!receiver || !donor) break;
+
+        result[donor.index]--;
+        result[receiver.index]++;
+    }
+
+    return result;
+}
+
+function buildAutoForgeStructureProfiles(baseStructure, sectorScores, targetCount) {
+    const profiles = [
+        {
+            key: "profile",
+            label: "PROFILOWY",
+            icon: "🧭",
+            description: "Najszerszy wariant. Trzyma kierunek i aktywne sektory, ale zostawia trochę zabezpieczenia poza głównym ogniem.",
+            structure: [...baseStructure]
+        },
+        {
+            key: "hot",
+            label: "GORĄCY",
+            icon: "🔥",
+            description: "Mocniej dociąża 2–3 najaktywniejsze sektory. Słabe dziesiątki mogą dostać zero.",
+            structure: concentrateStructure(baseStructure, sectorScores, targetCount, "hot")
+        },
+        {
+            key: "aggressive",
+            label: "AGRESYWNY",
+            icon: "⚡",
+            description: "Atakuje główne ogniska. Większość kuponu może siedzieć w 1–2 najmocniejszych dziesiątkach.",
+            structure: concentrateStructure(baseStructure, sectorScores, targetCount, "aggressive")
+        }
+    ];
+
+    // Jeżeli dwa warianty przypadkiem wyszły identyczne, dokładamy jeszcze jedno
+    // przesunięcie dla agresywnego, żeby użytkownik faktycznie dostał wybór.
+    if (profiles[2].structure.join("-") === profiles[1].structure.join("-")) {
+        profiles[2].structure = concentrateStructure(
+            profiles[1].structure,
+            sectorScores,
+            targetCount,
+            "aggressive"
+        );
+    }
+
+    return profiles.map(profile => ({
+        ...profile,
+        bandAllocation: getStructureBandAllocation(profile.structure)
+    }));
+}
+
 function analyzeAutoForgeWindow(draws, windowSize) {
     const sample = draws.slice(-Math.min(windowSize, draws.length));
     const sectorCount = currentGame.ranges.length;
@@ -928,18 +1243,34 @@ function analyzeAutoForgeWindow(draws, windowSize) {
 }
 
 function getAutoForgeWindowConfig() {
-    if (autoForgeMode === "5" || autoForgeMode === "10" || autoForgeMode === "15") {
+    if (String(autoForgeMode).startsWith("single-")) {
+        const size = Number(String(autoForgeMode).replace("single-", ""));
+        const safeSize = Number.isInteger(size) && size > 0 ? size : 15;
+        const patternSize = currentGame === games.multi ? Math.min(safeSize, 60) : safeSize;
+
         return {
-            requestedWindows: [Number(autoForgeMode)],
+            requestedWindows: [safeSize],
             weights: [1],
-            label: `${autoForgeMode}`
+            patternWindows: [patternSize],
+            patternWeights: [1],
+            label: `Tylko ${safeSize}`,
+            windowsLabel: `${safeSize}`
         };
     }
 
+    const preset = getAutoForgePreset(autoForgeMode) || getAutoForgePreset("auto");
+    const requestedWindows = [...preset.windows];
+    const weights = [...preset.weights];
+    const patternWindows = [...(preset.patternWindows || preset.windows)];
+    const patternWeights = [...(preset.patternWeights || preset.weights)];
+
     return {
-        requestedWindows: [5, 10, 15],
-        weights: [0.40, 0.35, 0.25],
-        label: "5 / 10 / 15"
+        requestedWindows,
+        weights,
+        patternWindows,
+        patternWeights,
+        label: `${preset.name} • ${requestedWindows.join(" / ")}`,
+        windowsLabel: requestedWindows.join(" / ")
     };
 }
 
@@ -1060,7 +1391,7 @@ function buildAutoForgePatternModel(draws, requestedWindows, weights) {
             });
 
             // Czwórki są sygnałem pomocniczym. Przy Multi (20 kul) nadal liczymy
-            // tylko na krótkich oknach 5/10/15, więc koszt pozostaje kontrolowany.
+            // na oknach przekazanych przez profil AUTO FORGE.
             forEachCombination(numbers, 4, combo => {
                 const key = getCombinationKey(combo);
                 localQuads.set(key, (localQuads.get(key) || 0) + 1);
@@ -1444,13 +1775,15 @@ function buildAutoForgeAnalysis() {
     const suggestedEven = clamp(Math.round(focusEvenShare * targetCount), 0, targetCount);
     const suggestedOdd = targetCount - suggestedEven;
 
-    // ETAP 4: relacje między liczbami. Najpierw budujemy niezależny model
-    // powrotów oraz współwystępowania par / trójek / czwórek na tych samych
-    // ważonych oknach 5/10/15.
+    // ETAP 4: relacje między liczbami. Trend stref/sektorów może korzystać z bardzo
+    // długich okien, natomiast w Multi relacje par / trójek / czwórek dostają
+    // osobne, krótsze okna. Dzięki temu profile 100/200/300 nie zamrażają UI.
+    const patternWindows = windowConfig.patternWindows || requestedWindows;
+    const patternWeights = windowConfig.patternWeights || weights;
     const patternModel = buildAutoForgePatternModel(
         draws,
-        requestedWindows,
-        weights
+        patternWindows,
+        patternWeights
     );
 
     // HOT / COLD pozostają czystą klasyfikacją trendu częstotliwościowego.
@@ -1499,7 +1832,11 @@ function buildAutoForgeAnalysis() {
         const isLatest = latestSet.has(n);
 
         const sectorComponent = sectorNorm * 35;
-        const hotColdComponent = isHot ? 20 : isCold ? -18 : frequencyNorm * 10;
+        // COLD jest wagą liczby, a nie wyrokiem dla całego aktywnego sektora.
+        // Im mocniejsze ognisko, tym słabsza kara za COLD — dzięki temu zimna
+        // liczba z gorącej dziesiątki może zrobić comeback i nadal wejść do kuponu.
+        const coldPenalty = -18 * (1 - 0.85 * sectorNorm);
+        const hotColdComponent = isHot ? 20 : isCold ? coldPenalty : frequencyNorm * 10;
         const returnComponent = isLatest ? patternModel.returnScores[n] * 15 : 0;
         const pairComponent = patternModel.pairCentrality[n] * 12;
         const tripleComponent = patternModel.tripleCentrality[n] * 7;
@@ -1540,16 +1877,30 @@ function buildAutoForgeAnalysis() {
     }
     rankedNumbers.sort((a, b) => b.score - a.score || a.number - b.number);
 
+    const structureProfiles = buildAutoForgeStructureProfiles(
+        structure,
+        sectorScores,
+        targetCount
+    );
+
     const activeNumberSet = new Set();
-    structure.forEach((quota, sectorIndex) => {
+    // Relacje pokazujemy dla unii sektorów używanych przez wszystkie trzy profile,
+    // żeby raport nie faworyzował tylko wariantu profilowego.
+    const activeStructureUnion = new Array(structure.length).fill(0);
+    structureProfiles.forEach(profile => {
+        profile.structure.forEach((quota, index) => {
+            activeStructureUnion[index] = Math.max(activeStructureUnion[index], quota);
+        });
+    });
+    activeStructureUnion.forEach((quota, sectorIndex) => {
         if (quota <= 0) return;
         const bounds = getSectorBounds(sectorIndex);
         for (let n = bounds.start; n <= bounds.end; n++) activeNumberSet.add(n);
     });
 
-    const topPairs = getTopPatternEntries(patternModel.pairScores, activeNumberSet, 5, structure);
-    const topTriples = getTopPatternEntries(patternModel.tripleScores, activeNumberSet, 4, structure);
-    const topQuads = getTopPatternEntries(patternModel.quadScores, activeNumberSet, 3, structure);
+    const topPairs = getTopPatternEntries(patternModel.pairScores, activeNumberSet, 5, activeStructureUnion);
+    const topTriples = getTopPatternEntries(patternModel.tripleScores, activeNumberSet, 4, activeStructureUnion);
+    const topQuads = getTopPatternEntries(patternModel.quadScores, activeNumberSet, 3, activeStructureUnion);
 
     const repeatCandidates = patternModel.latestNumbers
         .filter(number => activeNumberSet.has(number))
@@ -1570,7 +1921,7 @@ function buildAutoForgeAnalysis() {
         Math.min(targetCount, repeatCandidates.length)
     );
 
-    // Spójność profilu 5/10/15 — to nie jest prawdopodobieństwo trafienia.
+    // Spójność wybranego profilu okien — to nie jest prawdopodobieństwo trafienia.
     let sectorDispersion = 0;
     for (let sector = 0; sector < sectorCount; sector++) {
         const values = windowAnalyses
@@ -1608,6 +1959,7 @@ function buildAutoForgeAnalysis() {
         targetCount,
         modeLabel: windowConfig.label,
         windowsUsed: windowAnalyses.map(x => x.windowSize).join(" / "),
+        patternWindowsLabel: (windowConfig.patternWindows || requestedWindows).join(" / "),
         migrationText,
         migrationDelta,
         migrationStrength,
@@ -1625,6 +1977,7 @@ function buildAutoForgeAnalysis() {
         outsideTargetCount,
         signalStrength,
         structure,
+        structureProfiles,
         activeSectors,
         suggestedEven,
         suggestedOdd,
@@ -1648,14 +2001,18 @@ function buildAutoForgeAnalysis() {
 }
 
 
-function buildAutoForgeGenerationPlan(analysis) {
+function buildAutoForgeGenerationPlan(analysis, profile = null) {
+    const selectedStructure = Array.isArray(profile?.structure)
+        ? [...profile.structure]
+        : [...analysis.structure];
+
     // HOT oznacza wyłącznie prawdziwy TOP HOT z diagnozy.
     // Szerszy ranking liczbowy jest osobnym mechanizmem i nie miesza etykiet.
     const hotPool = [...(analysis.hotPool || [])];
     const hotBySector = new Array(currentGame.ranges.length).fill(0);
     hotPool.forEach(number => hotBySector[getSectorIndex(number)]++);
 
-    const maxHotThatFits = analysis.structure.reduce(
+    const maxHotThatFits = selectedStructure.reduce(
         (sum, quota, index) => sum + Math.min(quota, hotBySector[index]),
         0
     );
@@ -1679,7 +2036,10 @@ function buildAutoForgeGenerationPlan(analysis) {
     return {
         analysis,
         targetCount: analysis.targetCount,
-        structure: [...analysis.structure],
+        profileKey: profile?.key || "profile",
+        profileLabel: profile?.label || "PROFILOWY",
+        profileIcon: profile?.icon || "🧭",
+        structure: selectedStructure,
         hotPool,
         hotCount,
         coldPool: [...(analysis.coldPool || [])],
@@ -1702,14 +2062,32 @@ function getSafeAutoForgeColdPool(plan, manualExcludedNumbers = [], manualRequir
     const manualExcludedSet = new Set(manualExcludedNumbers);
     const manualRequiredSet = new Set(manualRequiredPool);
     const safeCold = [];
+    const sectorScores = plan.sectorScores || [];
+    const maxSectorScore = Math.max(...sectorScores, 0.0001);
+    const topSectorSet = new Set(
+        sectorScores
+            .map((score, index) => ({ score, index }))
+            .sort((a, b) => b.score - a.score)
+            .slice(0, currentGame === games.multi ? 3 : 2)
+            .map(item => item.index)
+    );
 
     for (const number of plan.coldPool) {
         if (manualRequiredSet.has(number) || manualExcludedSet.has(number)) continue;
 
         const sector = getSectorIndex(number);
         const quota = plan.structure[sector] || 0;
-        const bounds = getSectorBounds(sector);
+        const sectorNorm = (sectorScores[sector] || 0) / maxSectorScore;
+        const isProtectedHotSector =
+            topSectorSet.has(sector) ||
+            sectorNorm >= 0.68 ||
+            quota >= 2;
 
+        // Najważniejsza zasada: COLD nie wycina liczb z gorącego sektora.
+        // Tam działa tylko jako delikatna kara w AUTO SCORE.
+        if (isProtectedHotSector) continue;
+
+        const bounds = getSectorBounds(sector);
         const unavailableManual = [...manualExcludedSet]
             .filter(n => getSectorIndex(n) === sector).length;
         const unavailableAuto = safeCold
@@ -1725,7 +2103,6 @@ function getSafeAutoForgeColdPool(plan, manualExcludedNumbers = [], manualRequir
 
     return safeCold;
 }
-
 
 function getBestPatternMatch(number, selectedNumbers, size, scoreMap, maxScore) {
     if (!scoreMap || !selectedNumbers?.length || selectedNumbers.length < size - 1) {
@@ -2049,15 +2426,15 @@ function drawAutoForgeHotNumbers(
     return selected;
 }
 
-function applyAutoForgeProfileToControls(analysis) {
-    if (currentGame === games.multi) {
-        currentGame.count = analysis.targetCount;
-    }
+function applyAutoForgeProfileToControls(analysis, structureOverride = null) {
+    const selectedStructure = Array.isArray(structureOverride)
+        ? structureOverride
+        : analysis.structure;
 
     const structureFilter = document.getElementById("structureFilter");
     if (structureFilter) structureFilter.checked = true;
 
-    analysis.structure.forEach((value, index) => {
+    selectedStructure.forEach((value, index) => {
         const input = document.getElementById(`r${index + 1}`);
         if (input) input.value = value;
     });
@@ -2104,10 +2481,10 @@ function renderAutoForgeGenerationResult(analysis, plan, numbers) {
         <div class="auto-forge-generation-result">
             <div class="auto-forge-generation-head">
                 <div>
-                    <span>🎯 PROFIL ZASTOSOWANY</span>
+                    <span>${plan.profileIcon || "🎯"} ${plan.profileLabel || "PROFIL"} — PROFIL ZASTOSOWANY</span>
                     <strong>Kupon osadzony w strefie ${analysis.focusZone}</strong>
                 </div>
-                <strong>${analysis.focusTargetCount}/${analysis.targetCount} liczb w strefie docelowej</strong>
+                <strong>Struktura ${plan.structure.join("-")}</strong>
             </div>
 
             <div class="auto-forge-generation-grid">
@@ -2115,7 +2492,7 @@ function renderAutoForgeGenerationResult(analysis, plan, numbers) {
                 <div><span>Parzystość</span><strong>${even}/${odd}</strong></div>
                 <div><span>HOT w kuponie</span><strong>${hotOnTicket.length}: ${hotOnTicket.join(", ") || "—"}</strong></div>
                 <div><span>Powroty z ostatniego</span><strong>${returnsOnTicket.length}: ${returnsOnTicket.join(", ") || "—"}</strong></div>
-                <div><span>COLD wyłączone</span><strong>${plan.lastColdPoolUsed.join(", ") || "—"}</strong></div>
+                <div><span>COLD odrzucone tylko ze słabych sektorów</span><strong>${plan.lastColdPoolUsed.join(", ") || "—"}</strong></div>
                 <div><span>Cel powrotów</span><strong>${plan.suggestedReturnCount} • sygnał miękki</strong></div>
             </div>
 
@@ -2146,16 +2523,19 @@ function renderAutoForgeGenerationResult(analysis, plan, numbers) {
 
             <p>
                 Najpierw obowiązuje struktura wynikająca z migracji i skupisk. Dopiero wewnątrz tych sektorów
-                AUTO FORGE waży HOT/MID/COLD, powroty, pary, trójki, czwórki i parzystość. Losowość jest ostatnim krokiem,
+                AUTO FORGE waży HOT/MID/COLD, powroty, pary, trójki, czwórki i parzystość. COLD w gorącym sektorze nie jest twardo wycinane. Losowość jest ostatnim krokiem,
                 więc kupony mogą się różnić, ale pozostają wierne temu samemu profilowi danych.
             </p>
         </div>
     `;
 }
 
-function generateAutoForgeFromAnalysis(analysis) {
-    const plan = buildAutoForgeGenerationPlan(analysis);
-    applyAutoForgeProfileToControls(analysis);
+function generateAutoForgeFromAnalysis(analysis, profileKey = "profile") {
+    const profile = (analysis.structureProfiles || []).find(item => item.key === profileKey)
+        || (analysis.structureProfiles || [])[0]
+        || { key: "profile", label: "PROFILOWY", icon: "🧭", structure: analysis.structure };
+    const plan = buildAutoForgeGenerationPlan(analysis, profile);
+    applyAutoForgeProfileToControls(analysis, profile.structure);
 
     const numbers = generateMiniLotto(0, plan);
     if (!Array.isArray(numbers) || !numbers.length) return;
@@ -2259,12 +2639,13 @@ function renderAutoForgeReport(analysis) {
             </div>
 
             <div class="auto-forge-grid">
+                <div><span>Horyzont AUTO</span><strong>${analysis.modeLabel}</strong><small>realnie użyto: ${analysis.windowsUsed}</small></div>
                 <div><span>Dominująca strefa</span><strong>${analysis.dominantBand.key} • aktywność ×${analysis.dominantBand.intensity.toFixed(2)}</strong></div>
                 <div><span>Sugerowana struktura</span><strong>${analysis.structure.join("-")}</strong></div>
                 <div><span>Parzystość aktywnej strefy</span><strong>${analysis.suggestedEven}/${analysis.suggestedOdd} • ${Math.round(analysis.focusEvenShare * 100)}% parzystych</strong></div>
                 <div><span>Skupisko</span><strong>próg ${analysis.thresholds.cluster}+ • mocne ${analysis.thresholds.strong}+</strong></div>
                 <div><span>HOT — TOP trendu</span><strong>${analysis.hotPool.join(", ")}</strong></div>
-                <div><span>COLD — dół trendu</span><strong>${analysis.coldPool.join(", ")}</strong></div>
+                <div><span>COLD — dół trendu</span><strong>${analysis.coldPool.join(", ")} • w gorących sektorach dozwolone</strong></div>
             </div>
 
             <div class="auto-forge-section">
@@ -2322,8 +2703,8 @@ function renderAutoForgeReport(analysis) {
                     </div>
                 </div>
                 <small class="auto-forge-pattern-note">
-                    Procent przy relacji oznacza ważoną częstość współwystąpienia w aktualnych oknach analizy 5/10/15.
-                    Powroty i relacje są wagami wyboru, nie sztywnymi wymogami kuponu.
+                    Procent przy relacji oznacza ważoną częstość współwystąpienia.
+                    Okna relacji: ${analysis.patternWindowsLabel}. Powroty i relacje są wagami wyboru, nie sztywnymi wymogami kuponu.
                 </small>
             </div>
 
@@ -2332,14 +2713,41 @@ function renderAutoForgeReport(analysis) {
                 <div class="auto-forge-recent-list">${recentRows}</div>
             </div>
 
+            <div class="auto-forge-section auto-forge-profile-section">
+                <h4>🎯 Wybierz sposób ataku sektorów</h4>
+                <div class="auto-forge-profile-grid">
+                    ${(analysis.structureProfiles || []).map(profile => {
+                        const bandText = profile.bandAllocation
+                            .map(item => `${item.key} ${item.count}`)
+                            .join(" • ");
+                        return `
+                            <div class="auto-forge-profile-card profile-${profile.key}">
+                                <div class="auto-forge-profile-head">
+                                    <strong>${profile.icon} ${profile.label}</strong>
+                                    <span>${profile.structure.join("-")}</span>
+                                </div>
+                                <div class="auto-forge-profile-bands">${bandText}</div>
+                                <p>${profile.description}</p>
+                                <button type="button" class="primary-btn auto-forge-profile-generate" data-profile="${profile.key}">
+                                    Generuj ${profile.label.toLowerCase()}
+                                </button>
+                            </div>
+                        `;
+                    }).join("")}
+                </div>
+                <small class="auto-forge-pattern-note">
+                    Najpierw AUTO FORGE dzieli budżet liczb między LOW / MID / HIGH, potem między konkretne dziesiątki. Zera w słabych sektorach są dozwolone.
+                </small>
+            </div>
+
             <div class="auto-forge-next-step">
                 <div>
                     <span>ETAP 4 — SILNIK WYBORU LICZB AKTYWNY</span>
-                    <strong>Profil wybiera sektory, a scoring decyduje które liczby wewnątrz nich mają priorytet.</strong>
-                    <small>Struktura → HOT/MID/COLD → powroty → pary/trójki/czwórki → parzystość → ważone RNG. Suma nie steruje AUTO FORGE.</small>
+                    <strong>Masz teraz 3 warianty struktury: profilowy, gorący i agresywny.</strong>
+                    <small>Strefa → sektor/skupisko → HOT/MID/COLD jako waga → powroty/relacje → parzystość → ważone RNG.</small>
                 </div>
                 <button id="autoForgeGenerateFromProfileBtn" class="primary-btn auto-forge-generate-profile-btn">
-                    🎯 GENERUJ Z TEGO PROFILU
+                    🧭 GENERUJ PROFILOWY
                 </button>
             </div>
 
@@ -2352,10 +2760,16 @@ function renderAutoForgeReport(analysis) {
         </div>
     `;
 
+    document.querySelectorAll(".auto-forge-profile-generate").forEach(button => {
+        button.addEventListener("click", () => {
+            generateAutoForgeFromAnalysis(analysis, button.dataset.profile || "profile");
+        });
+    });
+
     const generateFromProfileBtn = document.getElementById("autoForgeGenerateFromProfileBtn");
     if (generateFromProfileBtn) {
         generateFromProfileBtn.addEventListener("click", () => {
-            generateAutoForgeFromAnalysis(analysis);
+            generateAutoForgeFromAnalysis(analysis, "profile");
         });
     }
 }
@@ -2394,13 +2808,14 @@ function validateStructureSettings() {
 
     // Sprawdzamy, ile liczb łącznie wymaga struktura
     const wantedTotal = wanted.reduce((a, b) => a + b, 0);
+    const targetCount = getGeneratorTargetCount();
 
-    if (wantedTotal !== currentGame.count) {
+    if (wantedTotal !== targetCount) {
         alert(
             `❌ Błędna struktura!\n\n` +
-            `Wybrana liczba kul: ${currentGame.count}\n` +
+            `Wybrana liczba kul: ${targetCount}\n` +
             `Struktura wymaga: ${wantedTotal}\n\n` +
-            `Suma pól struktury musi wynosić dokładnie ${currentGame.count}.`
+            `Suma pól struktury musi wynosić dokładnie ${targetCount}.`
         );
 
         return false;
@@ -2530,13 +2945,15 @@ function validateStructureSettings() {
     const wantedOdd =
         Number(document.getElementById("oddCount").value);
 
-    if (wantedEven + wantedOdd !== currentGame.count) {
+    const targetCount = getGeneratorTargetCount();
+
+    if (wantedEven + wantedOdd !== targetCount) {
 
         alert(
             `❌ Błędne ustawienie parzystości!\n\n` +
-            `Wybrana liczba kul: ${currentGame.count}\n` +
+            `Wybrana liczba kul: ${targetCount}\n` +
             `Parzyste + nieparzyste: ${wantedEven + wantedOdd}\n\n` +
-            `Suma musi wynosić dokładnie ${currentGame.count}.`
+            `Suma musi wynosić dokładnie ${targetCount}.`
         );
 
         return false;
@@ -2600,8 +3017,10 @@ function validateRequiredSettings(excludedNumbers = [], excludeFilter = false) {
         return false;
     }
 
-    if (settings.count > currentGame.count) {
-        alert(`❌ Kupon ma ${currentGame.count} liczb, a chcesz pobrać ${settings.count} obowiązkowych.`);
+    const targetCount = getGeneratorTargetCount();
+
+    if (settings.count > targetCount) {
+        alert(`❌ Kupon ma ${targetCount} liczb, a chcesz pobrać ${settings.count} obowiązkowych.`);
         return false;
     }
 
@@ -2659,10 +3078,7 @@ function generateMiniLotto(attempt = 0, autoForgePlan = null) {
     const sumFilter = document.getElementById("sumFilter").checked;
     const sumMin = Number(document.getElementById("sumMin").value);
     const sumMax = Number(document.getElementById("sumMax").value);
-
-    if (currentGame === games.multi) {
-        currentGame.count = Number(document.getElementById("multiCount").value);
-    }
+    const targetCount = getGeneratorTargetCount();
 
     if (!validateStructureSettings()) return null;
     if (!validateEvenOddSettings()) return null;
@@ -2747,7 +3163,7 @@ function generateMiniLotto(attempt = 0, autoForgePlan = null) {
             }
         }
 
-        while (numbers.length < currentGame.count && pool.length) {
+        while (numbers.length < targetCount && pool.length) {
             let candidatePool = pool;
             if (autoForgePlan) {
                 const parityPool = filterAutoForgePoolByParity(
@@ -2786,7 +3202,7 @@ function generateMiniLotto(attempt = 0, autoForgePlan = null) {
             pool.splice(originalIndex, 1);
         }
 
-        if (numbers.length !== currentGame.count) {
+        if (numbers.length !== targetCount) {
             return generateMiniLotto(attempt + 1, autoForgePlan);
         }
     }
@@ -2856,7 +3272,7 @@ function generateMiniLotto(attempt = 0, autoForgePlan = null) {
 
     const stats = document.getElementById("stats");
     const parzyste = numbers.filter(n => n % 2 === 0).length;
-    const nieparzyste = currentGame.count - parzyste;
+    const nieparzyste = numbers.length - parzyste;
     const ranges = new Array(currentGame.ranges.length).fill(0);
 
     numbers.forEach(n => {
@@ -2871,6 +3287,13 @@ function generateMiniLotto(attempt = 0, autoForgePlan = null) {
     stats.innerHTML = `
         <div class="stats-card">
             <h2>📊 Statystyki kuponu</h2>
+
+            ${isSystemGame() ? `
+            <div class="stat">
+                <span>Tryb</span>
+                <strong>${targetCount === currentGame.count ? "Zwykły" : `System ${targetCount} • ${combinationCount(targetCount, currentGame.count)} kombinacji`}</strong>
+            </div>
+            ` : ""}
 
             <div class="stat">
                 <span>Suma</span>
@@ -3020,7 +3443,7 @@ for (let i = 0; i < currentGame.ranges.length; i++) {
     }
 
     const even = numbers.filter(n => n % 2 === 0).length;
-    const odd = currentGame.count - even;
+    const odd = numbers.length - even;
 
     const wantedEven =
         Number(document.getElementById("evenCount").value);
@@ -3651,6 +4074,53 @@ function renderStatsPulsePanel(pulse, continuity, migration) {
     `;
 }
 
+function initializeStatsDashboard() {
+    const tabs = document.getElementById("statsTabs");
+    const summary = document.getElementById("statsSummaryGrid");
+    if (!tabs || !summary) return;
+
+    const classify = element => {
+        if (element.classList.contains("stats-return-panel")) return "returns";
+        const title = (element.querySelector("h3, h4")?.textContent || "").toUpperCase();
+
+        if (title.includes("HOT") || title.includes("COLD")) return "numbers";
+        if (title.includes("PARY") || title.includes("TRÓJKI") || title.includes("CZWÓRKI")) return "patterns";
+        if (
+            title.includes("SEKTOR") || title.includes("MIGRAC") ||
+            title.includes("ROZRZUT") || title.includes("ZAGĘSZCZEN")
+        ) return "sectors";
+        if (title.includes("POWROTY")) return "returns";
+        return "overview";
+    };
+
+    [...summary.children].forEach(element => {
+        element.dataset.statsTabSection = classify(element);
+    });
+
+    const standaloneSections = [...document.querySelectorAll("[data-stats-tab-section]")]
+        .filter(element => element !== summary);
+
+    const activate = tab => {
+        tabs.querySelectorAll("button[data-tab]").forEach(button => {
+            button.classList.toggle("active", button.dataset.tab === tab);
+        });
+
+        [...summary.children].forEach(element => {
+            element.hidden = element.dataset.statsTabSection !== tab;
+        });
+
+        standaloneSections.forEach(element => {
+            element.hidden = element.dataset.statsTabSection !== tab;
+        });
+    };
+
+    tabs.querySelectorAll("button[data-tab]").forEach(button => {
+        button.addEventListener("click", () => activate(button.dataset.tab));
+    });
+
+    activate("overview");
+}
+
 function pokazStatystyki() {
 
     const statystyki = {};
@@ -3974,7 +4444,21 @@ const clusterContinuity = buildStatsClusterContinuity(getCurrentGameDraws(), 5);
 const sectorMigration = buildStatsSectorMigration(getCurrentGameDraws(), 5);
     let html = `
 <h2>📊 Statystyki ${currentGame.title}</h2>
-<div style="margin: 15px 0 25px 0;">
+<div class="stats-command-bar">
+    <div>
+        <strong>Centrum statystyk</strong>
+        <span>Wybierz moduł zamiast przewijać całą ścianę danych.</span>
+    </div>
+    <div id="statsTabs" class="stats-tabs">
+        <button type="button" data-tab="overview" class="active">🏠 Szybki obraz</button>
+        <button type="button" data-tab="pulse">⚡ Puls 2/3/4</button>
+        <button type="button" data-tab="sectors">🧭 Sektory</button>
+        <button type="button" data-tab="numbers">🔥 Liczby</button>
+        <button type="button" data-tab="patterns">🧩 Wzorce</button>
+        <button type="button" data-tab="returns">🔁 Powroty</button>
+    </div>
+</div>
+<div class="stats-window-controls">
     <label for="analysisWindowSelect">
         Zakres analizy:
     </label>
@@ -4006,8 +4490,10 @@ ${currentGame === games.multi ? `
     </select>
 ` : ""}
 </div>
+<div class="stats-tab-section" data-stats-tab-section="pulse">
 ${renderStatsPulsePanel(shortPulse, clusterContinuity, sectorMigration)}
-<div class="statsSummary">
+</div>
+<div class="statsSummary" id="statsSummaryGrid">
 <div class="statsBox latest-draw-stats-box">
     <h3>✅ OSTATNIE LOSOWANIE</h3>
 
@@ -4290,6 +4776,8 @@ ${renderStatsPatternBox("TOP CZWÓRKI", "◼️", quadStats)}
 
 </div>
 
+<div class="stats-number-ranking-panel" data-stats-tab-section="numbers">
+<h3>🔢 PEŁNY RANKING LICZB</h3>
 <table class="statsTable">
 
 <tr>
@@ -4309,9 +4797,10 @@ ranking.forEach(item => {
 
 });
 
-html += "</table>";
+html += "</table></div>";
 
 contentArea.innerHTML = html;
+initializeStatsDashboard();
 const analysisWindowSelect =
     document.getElementById("analysisWindowSelect");
 
