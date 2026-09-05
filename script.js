@@ -80,6 +80,7 @@ let analysisWindow = 20;
 let hotColdCount = 5;
 let autoForgeMode = "auto";
 let autoForgeSecondaryOverride = null;
+let lastGeneratedTicketMeta = null;
 
 // AUTO FORGE — profile okien analizy zależne od gry.
 // Pierwsze okno ma zwykle największą wagę, dzięki czemu długi profil
@@ -564,6 +565,35 @@ ${isSystemGame() ? `
 </div>
 ` : ""}
 
+<div class="ticket-batch-options">
+    <div class="ticket-batch-count-box">
+        <label for="ticketBatchCount">🎫 Ile kuponów wygenerować?</label>
+        <select id="ticketBatchCount">
+            ${Array.from({ length: 20 }, (_, index) => index + 1).map(value => `
+                <option value="${value}" ${value === 1 ? "selected" : ""}>${value}</option>
+            `).join("")}
+        </select>
+    </div>
+
+    ${currentGame === games.multi ? `
+    <div class="multi-coverage-box">
+        <label class="multi-coverage-toggle">
+            <input type="checkbox" id="multiCoverageMode">
+            🧩 TEST 8 × 10 — pokryj całą planszę 1–80
+        </label>
+        <select id="multiCoverageStyle">
+            <option value="sector">Sektorowo — jedna dziesiątka na kupon</option>
+            <option value="mixed">Mieszane — losowy podział 1–80 bez powtórzeń</option>
+        </select>
+        <small>
+            Każda liczba 1–80 pojawi się dokładnie raz w całym pakiecie. Jeśli wszystkie 8 zakładów zagrasz z opcją Plus, liczba PLUS na pewno będzie na jednym z nich. To gwarantuje wygraną z tytułu trafienia Plusa, ale nie gwarantuje zysku netto po odjęciu kosztu wszystkich zakładów.
+        </small>
+    </div>
+    ` : ""}
+
+    <div id="ticketBatchInfo" class="ticket-batch-info"></div>
+</div>
+
 <div class="auto-forge-controls">
     <div class="auto-forge-stage-badge">ETAP 4 • ANALIZA + SILNIK WYBORU</div>
     <label for="autoForgeMode">Horyzont analizy AUTO FORGE</label>
@@ -768,19 +798,41 @@ ${currentGame.ranges.map((value,index)=>{
         }
     });
 
-    generateBtn.addEventListener("click", generateMiniLotto);
+    generateBtn.addEventListener("click", () => generateTicketBatch());
     autoForgeBtn.addEventListener("click", runAutoForge);
     if (currentGame === games.multi) {
         const multiCount = document.getElementById("multiCount");
-        multiCount.addEventListener("change", syncTicketCountControls);
+        multiCount.addEventListener("change", () => {
+            syncTicketCountControls();
+            updateTicketBatchInfo();
+        });
     }
 
     if (isSystemGame()) {
         const systemCount = document.getElementById("systemCount");
-        systemCount.addEventListener("change", syncTicketCountControls);
+        systemCount.addEventListener("change", () => {
+            syncTicketCountControls();
+            updateTicketBatchInfo();
+        });
+    }
+
+    const ticketBatchCount = document.getElementById("ticketBatchCount");
+    if (ticketBatchCount) {
+        ticketBatchCount.addEventListener("change", updateTicketBatchInfo);
+    }
+
+    const multiCoverageMode = document.getElementById("multiCoverageMode");
+    const multiCoverageStyle = document.getElementById("multiCoverageStyle");
+    if (multiCoverageMode) {
+        multiCoverageMode.addEventListener("change", syncMultiCoverageControls);
+    }
+    if (multiCoverageStyle) {
+        multiCoverageStyle.addEventListener("change", updateTicketBatchInfo);
     }
 
     syncTicketCountControls();
+    syncMultiCoverageControls();
+    updateTicketBatchInfo();
     renderLatestDrawStatus();
 }
 
@@ -869,6 +921,276 @@ function syncTicketCountControls() {
     if (requiredInput) requiredInput.max = String(targetCount);
 
     updateSystemInfo();
+}
+
+function getTicketBatchCount() {
+    const value = Number(document.getElementById("ticketBatchCount")?.value || 1);
+    return clamp(Number.isFinite(value) ? Math.round(value) : 1, 1, 20);
+}
+
+function isMultiCoverageMode() {
+    return currentGame === games.multi && Boolean(document.getElementById("multiCoverageMode")?.checked);
+}
+
+function getMultiCoverageStyle() {
+    return document.getElementById("multiCoverageStyle")?.value || "sector";
+}
+
+function syncMultiCoverageControls() {
+    if (currentGame !== games.multi) return;
+
+    const enabled = isMultiCoverageMode();
+    const batchSelect = document.getElementById("ticketBatchCount");
+    const multiCount = document.getElementById("multiCount");
+    const styleSelect = document.getElementById("multiCoverageStyle");
+
+    if (enabled) {
+        if (batchSelect) batchSelect.value = "8";
+        if (multiCount) multiCount.value = "10";
+    }
+
+    if (batchSelect) batchSelect.disabled = enabled;
+    if (multiCount) multiCount.disabled = enabled;
+    if (styleSelect) styleSelect.disabled = !enabled;
+
+    syncTicketCountControls();
+    updateTicketBatchInfo();
+}
+
+function updateTicketBatchInfo() {
+    const info = document.getElementById("ticketBatchInfo");
+    if (!info) return;
+
+    if (isMultiCoverageMode()) {
+        const style = getMultiCoverageStyle() === "sector"
+            ? "sektorowo: 1–10, 11–20, …, 71–80"
+            : "mieszane: losowy podział 1–80 bez powtórzeń";
+        info.innerHTML = `
+            <strong>Pokrycie pełne:</strong> 8 kuponów × 10 liczb • ${style}.
+            <span>80/80 liczb pokrytych, 0 powtórzeń między kuponami.</span>
+        `;
+        return;
+    }
+
+    const count = getTicketBatchCount();
+    const target = getGeneratorTargetCount();
+    const systemText = isSystemGame() && target > currentGame.count
+        ? ` • każdy jako system ${target} (${combinationCount(target, currentGame.count)} kombinacji)`
+        : "";
+
+    info.innerHTML = `
+        <strong>${count} ${count === 1 ? "kupon" : "kuponów"}</strong> po ${target} liczb${systemText}.
+        <span>Generator próbuje tworzyć różne zestawy przy tych samych aktywnych filtrach.</span>
+    `;
+}
+
+function buildTicketMeta(numbers, euroNumbers = [], extraNumber = []) {
+    const sorted = [...numbers].sort((a, b) => a - b);
+    const ranges = new Array(currentGame.ranges.length).fill(0);
+    sorted.forEach(n => ranges[getSectorIndex(n)]++);
+    const even = sorted.filter(n => n % 2 === 0).length;
+
+    return {
+        numbers: sorted,
+        euroNumbers: [...euroNumbers],
+        extraNumber: [...extraNumber],
+        sum: sorted.reduce((a, b) => a + b, 0),
+        even,
+        odd: sorted.length - even,
+        structure: ranges,
+        targetCount: sorted.length
+    };
+}
+
+function getTicketUniquenessKey(ticket) {
+    return [
+        ticket.numbers.join("-"),
+        (ticket.euroNumbers || []).join("-"),
+        (ticket.extraNumber || []).join("-")
+    ].join("|");
+}
+
+function renderTicketBatch(tickets, options = {}) {
+    const numbersDiv = document.getElementById("numbers");
+    const stats = document.getElementById("stats");
+    const euroDiv = document.getElementById("euroNumbers");
+    const extraDiv = document.getElementById("extraNumber");
+
+    if (euroDiv) euroDiv.innerHTML = "";
+    if (extraDiv) extraDiv.innerHTML = "";
+    if (!numbersDiv || !stats) return;
+
+    const title = options.title || "Wygenerowane kupony";
+    const subtitle = options.subtitle || "";
+
+    numbersDiv.innerHTML = `
+        <div class="ticket-batch-grid">
+            ${tickets.map((ticket, index) => `
+                <article class="ticket-batch-card">
+                    <div class="ticket-batch-card-head">
+                        <strong>Kupon #${index + 1}</strong>
+                        <span>${ticket.structure.join("-")}</span>
+                    </div>
+                    <div class="ticket-batch-balls">
+                        ${ticket.numbers.map(number => `
+                            <div class="ball">${String(number).padStart(2, "0")}</div>
+                        `).join("")}
+                    </div>
+                    ${ticket.euroNumbers?.length ? `
+                        <div class="ticket-secondary-row">
+                            <span>Euro:</span>
+                            ${ticket.euroNumbers.map(number => `<strong>⭐ ${String(number).padStart(2, "0")}</strong>`).join("")}
+                        </div>
+                    ` : ""}
+                    ${ticket.extraNumber?.length ? `
+                        <div class="ticket-secondary-row">
+                            <span>Extra:</span>
+                            ${ticket.extraNumber.map(number => `<strong>⭐ ${number}</strong>`).join("")}
+                        </div>
+                    ` : ""}
+                    <div class="ticket-batch-meta">
+                        <span>Σ ${ticket.sum}</span>
+                        <span>P/N ${ticket.even}/${ticket.odd}</span>
+                        ${isSystemGame() ? `<span>${ticket.targetCount === currentGame.count ? "zwykły" : `system ${ticket.targetCount}`}</span>` : ""}
+                    </div>
+                </article>
+            `).join("")}
+        </div>
+    `;
+
+    stats.innerHTML = `
+        <div class="stats-card ticket-batch-summary">
+            <h2>🎫 ${title}</h2>
+            <div class="stat"><span>Liczba kuponów</span><strong>${tickets.length}</strong></div>
+            <div class="stat"><span>Liczb na kupon</span><strong>${tickets[0]?.targetCount || getGeneratorTargetCount()}</strong></div>
+            ${options.coverage ? `
+                <div class="stat"><span>Pokrycie planszy</span><strong>80 / 80</strong></div>
+                <div class="stat"><span>Powtórzenia między kuponami</span><strong>0</strong></div>
+                <div class="stat"><span>Liczba PLUS</span><strong>na pewno na 1 z 8 kuponów</strong></div>
+                <p class="ticket-batch-warning">Przy 8 zakładach z opcją Plus pełne pokrycie 1–80 gwarantuje, że jeden kupon zawiera wylosowanego Plusa. To oznacza gwarantowaną wygraną z Plusa, ale nie gwarantuje, że łączna wypłata przewyższy koszt całego pakietu.</p>
+            ` : ""}
+            ${subtitle ? `<p class="ticket-batch-summary-note">${subtitle}</p>` : ""}
+        </div>
+    `;
+}
+
+function shuffleArray(values) {
+    const result = [...values];
+    for (let i = result.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [result[i], result[j]] = [result[j], result[i]];
+    }
+    return result;
+}
+
+function generateMultiCoverageTickets(analysis = null) {
+    if (currentGame !== games.multi) return [];
+
+    const style = getMultiCoverageStyle();
+    let rawTickets = [];
+
+    if (style === "sector") {
+        rawTickets = currentGame.ranges.map((end, index) => {
+            const start = index === 0 ? 1 : currentGame.ranges[index - 1] + 1;
+            return Array.from({ length: end - start + 1 }, (_, offset) => start + offset);
+        });
+
+        // Jeżeli AUTO FORGE jest po analizie, tylko ustawiamy kolejność kart od
+        // najmocniejszego sektora. Same liczby nadal pokrywają 1–80 dokładnie raz.
+        if (analysis?.activeSectors?.length) {
+            const rank = new Map(analysis.activeSectors.map((sector, index) => [sector.index, index]));
+            rawTickets = rawTickets
+                .map((numbers, index) => ({ numbers, index }))
+                .sort((a, b) => (rank.get(a.index) ?? 999) - (rank.get(b.index) ?? 999))
+                .map(item => item.numbers);
+        }
+    } else {
+        const allNumbers = shuffleArray(Array.from({ length: 80 }, (_, index) => index + 1));
+        rawTickets = Array.from({ length: 8 }, (_, index) =>
+            allNumbers.slice(index * 10, index * 10 + 10)
+        );
+    }
+
+    return rawTickets.map(numbers => buildTicketMeta(numbers));
+}
+
+function generateMultiCoverageBatch(analysis = null, profile = null) {
+    const tickets = generateMultiCoverageTickets(analysis);
+    if (!tickets.length) return [];
+
+    renderTicketBatch(tickets, {
+        coverage: true,
+        title: "TEST 8 × 10 — pełne pokrycie 1–80",
+        subtitle: profile
+            ? `${profile.icon || "🎯"} ${profile.label || "AUTO FORGE"} • tryb pokrycia zastępuje strukturę pojedynczego kuponu, bo cały pakiet musi wykorzystać każdą liczbę dokładnie raz.`
+            : "Tryb pokrycia jest testem całej planszy; ręczne wykluczenia i struktura pojedynczego kuponu nie są tu stosowane."
+    });
+
+    const result = document.getElementById("autoForgeGenerationResult");
+    if (result && analysis) {
+        result.innerHTML = `
+            <div class="auto-forge-generation-result">
+                <strong>🧩 Wygenerowano 8 kuponów pokrywających 1–80.</strong>
+                <p>Najmocniejsze sektory są pokazane jako pierwsze w wariancie sektorowym. Każda liczba występuje dokładnie raz w całym pakiecie.</p>
+            </div>
+        `;
+    }
+
+    return tickets;
+}
+
+function generateTicketBatch(autoForgePlanFactory = null, options = {}) {
+    if (isMultiCoverageMode()) {
+        return generateMultiCoverageBatch(options.analysis || null, options.profile || null);
+    }
+
+    const requested = getTicketBatchCount();
+    if (requested <= 1 && !autoForgePlanFactory) {
+        const numbers = generateMiniLotto();
+        return Array.isArray(numbers) && lastGeneratedTicketMeta ? [lastGeneratedTicketMeta] : [];
+    }
+
+    const tickets = [];
+    const seen = new Set();
+    let attempts = 0;
+    const maxAttempts = Math.max(30, requested * 40);
+
+    while (tickets.length < requested && attempts < maxAttempts) {
+        attempts++;
+        const plan = typeof autoForgePlanFactory === "function"
+            ? autoForgePlanFactory()
+            : null;
+        const numbers = generateMiniLotto(0, plan);
+        if (!Array.isArray(numbers) || !lastGeneratedTicketMeta) break;
+
+        const ticket = {
+            ...lastGeneratedTicketMeta,
+            autoForgePlan: plan
+        };
+        const key = getTicketUniquenessKey(ticket);
+        if (seen.has(key)) continue;
+
+        seen.add(key);
+        tickets.push(ticket);
+    }
+
+    if (!tickets.length) return [];
+
+    renderTicketBatch(tickets, {
+        title: options.title || "Pakiet wygenerowanych kuponów",
+        subtitle: tickets.length < requested
+            ? `Udało się utworzyć ${tickets.length} różnych zestawów z ${requested}. Aktywne filtry mogą mocno ograniczać liczbę możliwych kuponów.`
+            : (options.subtitle || "Każdy zestaw przeszedł przez te same aktywne filtry.")
+    });
+
+    if (tickets.length < requested) {
+        alert(
+            `⚠️ Wygenerowano ${tickets.length} różnych kuponów z ${requested}.\n\n` +
+            `Filtry są prawdopodobnie tak ciasne, że generator szybko trafia na duplikaty.`
+        );
+    }
+
+    return tickets;
 }
 
 function getSectorIndex(number) {
@@ -2534,13 +2856,42 @@ function generateAutoForgeFromAnalysis(analysis, profileKey = "profile") {
     const profile = (analysis.structureProfiles || []).find(item => item.key === profileKey)
         || (analysis.structureProfiles || [])[0]
         || { key: "profile", label: "PROFILOWY", icon: "🧭", structure: analysis.structure };
-    const plan = buildAutoForgeGenerationPlan(analysis, profile);
+
     applyAutoForgeProfileToControls(analysis, profile.structure);
 
-    const numbers = generateMiniLotto(0, plan);
-    if (!Array.isArray(numbers) || !numbers.length) return;
+    if (isMultiCoverageMode()) {
+        generateMultiCoverageBatch(analysis, profile);
+        return;
+    }
 
-    renderAutoForgeGenerationResult(analysis, plan, numbers);
+    const requested = getTicketBatchCount();
+    if (requested <= 1) {
+        const plan = buildAutoForgeGenerationPlan(analysis, profile);
+        const numbers = generateMiniLotto(0, plan);
+        if (!Array.isArray(numbers) || !numbers.length) return;
+        renderAutoForgeGenerationResult(analysis, plan, numbers);
+        return;
+    }
+
+    const tickets = generateTicketBatch(
+        () => buildAutoForgeGenerationPlan(analysis, profile),
+        {
+            analysis,
+            profile,
+            title: `AUTO FORGE — ${profile.icon || "🎯"} ${profile.label}`,
+            subtitle: `${requested} kuponów z tym samym profilem sektorów, ale z niezależnym ważonym wyborem liczb.`
+        }
+    );
+
+    const result = document.getElementById("autoForgeGenerationResult");
+    if (result && tickets.length) {
+        result.innerHTML = `
+            <div class="auto-forge-generation-result">
+                <strong>${profile.icon || "🎯"} ${profile.label}: wygenerowano ${tickets.length} różnych kuponów.</strong>
+                <p>Każdy kupon trzyma strukturę ${profile.structure.join("-")}, a liczby wewnątrz sektorów są wybierane niezależnie według scoringu AUTO FORGE.</p>
+            </div>
+        `;
+    }
 }
 
 function renderAutoForgeReport(analysis) {
@@ -3331,6 +3682,8 @@ function generateMiniLotto(attempt = 0, autoForgePlan = null) {
             </div>
         </div>
     `;
+
+    lastGeneratedTicketMeta = buildTicketMeta(numbers, euroNumbers, extraNumber);
 
     if (autoForgePlan) {
         const hotSet = new Set(autoForgePlan.hotPool);
