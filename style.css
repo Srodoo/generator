@@ -1972,3 +1972,563 @@ button,.primary-btn{border:0;border-radius:11px!important;padding:11px 16px!impo
     .ticket-batch-info{grid-column:1;}
     .ticket-batch-grid{grid-template-columns:1fr;}
 }
+
+/* =========================================================
+   LOTTOFORGE — STRUCTURE REWORK 1-9 / 10-19 / ...
+   ========================================================= */
+.structure-scheme-hint{
+    margin:-3px 0 14px;
+    padding:9px 11px;
+    border:1px solid rgba(124,92,255,.18);
+    border-radius:10px;
+    background:rgba(124,92,255,.055);
+    color:#9eabc0;
+    font-size:11px;
+    line-height:1.55;
+    font-weight:700;
+    letter-spacing:.01em;
+}
+
+/* =========================================================
+   LOTTOFORGE 2026-09-06 — COMPACT STATS DASHBOARD
+   Statystyki wykorzystują własny układ. Generator nadal używa flex.
+   ========================================================= */
+#contentArea.stats-view{
+    display:block!important;
+    width:100%;
+    min-width:0;
+}
+
+/* Nie pozwalamy panelom rozciągać się do wysokości sąsiada. */
+.stats-view .statsSummary{
+    display:grid!important;
+    grid-template-columns:repeat(auto-fit,minmax(220px,300px));
+    align-items:start!important;
+    align-content:start;
+    justify-content:start;
+    gap:12px!important;
+    margin:12px 0 18px!important;
+}
+
+.stats-view .statsBox{
+    width:100%!important;
+    min-width:0!important;
+    height:auto!important;
+    min-height:0!important;
+    align-self:start!important;
+    padding:12px 13px!important;
+    border-radius:12px!important;
+}
+
+.stats-view .statsBox h3{
+    margin:0 0 9px!important;
+    font-size:13px!important;
+    line-height:1.25;
+}
+
+.stats-view .statsBox > div:not(.cold-copy-row){
+    padding:4px 0!important;
+    min-height:0!important;
+    gap:10px;
+    font-size:12px;
+}
+
+.stats-view .statsBox > div > span,
+.stats-view .statsBox > div > strong{
+    line-height:1.25;
+}
+
+/* Ostatnie losowanie może być odrobinę szersze, ale nadal zwarte. */
+.stats-view .latest-draw-stats-box{
+    grid-column:span 2;
+    max-width:612px;
+}
+
+.stats-view .latest-draw-stats-numbers strong{
+    margin-top:4px!important;
+    line-height:1.35!important;
+    font-size:12px;
+}
+
+/* Pasek sterowania i zakres analizy zajmują tyle miejsca, ile faktycznie potrzebują. */
+.stats-view .stats-command-bar{
+    margin:10px 0 8px!important;
+    padding:11px 12px!important;
+    border-radius:12px!important;
+}
+
+.stats-view .stats-command-bar > div:first-child{
+    margin-bottom:8px!important;
+}
+
+.stats-view .stats-tabs{
+    gap:6px!important;
+}
+
+.stats-view .stats-tabs button{
+    padding:7px 10px!important;
+    font-size:11px;
+}
+
+.stats-view .stats-window-controls{
+    display:flex;
+    align-items:center;
+    flex-wrap:wrap;
+    gap:8px 14px;
+    width:max-content;
+    max-width:100%;
+    margin:8px 0 12px!important;
+    padding:9px 11px!important;
+}
+
+.stats-view .stats-window-controls br{
+    display:none;
+}
+
+.stats-view .stats-window-controls label{
+    margin:0!important;
+    font-size:11px;
+}
+
+.stats-view .stats-window-controls select{
+    width:auto!important;
+    min-width:125px;
+    min-height:32px!important;
+    margin:0!important;
+    padding:5px 8px!important;
+    font-size:11px;
+}
+
+/* Zwykłe tabele: mniej pustych marginesów, więcej danych na ekranie. */
+.stats-view .statsTable{
+    width:auto!important;
+    max-width:100%!important;
+    margin:10px 0!important;
+    table-layout:auto;
+}
+
+.stats-view .statsTable th{
+    padding:7px 9px!important;
+    font-size:10px!important;
+}
+
+.stats-view .statsTable td{
+    padding:6px 9px!important;
+    font-size:11px!important;
+}
+
+.stats-view .stats-number-ranking-panel{
+    width:min(620px,100%);
+    padding:12px!important;
+    margin-top:10px!important;
+}
+
+.stats-view .stats-number-ranking-panel h3{
+    margin:0 0 8px!important;
+    font-size:13px;
+}
+
+/* Panele większych modułów (Puls / Powroty) nie dziedziczą ograniczenia 300 px. */
+.stats-view .stats-pulse-panel,
+.stats-view .stats-return-panel{
+    width:min(1100px,100%);
+    height:auto!important;
+    min-height:0!important;
+    align-self:start!important;
+}
+
+/* Pole kopiowania HOT/COLD też zwarte. */
+.stats-view .cold-copy-row{
+    margin-top:8px!important;
+    padding-top:8px!important;
+    gap:6px!important;
+}
+
+.stats-view .cold-copy-row input,
+.stats-view .cold-copy-row button{
+    min-height:30px;
+    padding:6px 8px!important;
+    font-size:10px!important;
+}
+
+@media(max-width:1050px){
+    .stats-view .statsSummary{
+        grid-template-columns:repeat(auto-fit,minmax(210px,1fr));
+    }
+    .stats-view .latest-draw-stats-box{
+        grid-column:1 / -1;
+        max-width:none;
+    }
+}
+
+@media(max-width:650px){
+    .stats-view .statsSummary{grid-template-columns:1fr;}
+    .stats-view .latest-draw-stats-box{grid-column:auto;}
+    .stats-view .stats-window-controls{width:100%;}
+}
+
+/* =========================================================
+   LOTTOFORGE 2026-09-06 — MIGRATION CHART
+   ========================================================= */
+.stats-view .stats-migration-chart-box{
+    grid-column:span 3;
+    width:min(924px,100%)!important;
+    max-width:924px;
+    padding:13px 14px!important;
+}
+
+.stats-migration-chart-summary{
+    display:grid!important;
+    grid-template-columns:repeat(4,minmax(110px,1fr));
+    gap:8px!important;
+    margin-bottom:10px;
+}
+
+.stats-migration-chart-summary > div{
+    display:flex!important;
+    flex-direction:column;
+    align-items:flex-start!important;
+    justify-content:flex-start!important;
+    gap:3px!important;
+    padding:8px 9px!important;
+    border:1px solid rgba(92,108,137,.18)!important;
+    border-radius:9px;
+    background:#0d131e;
+}
+
+.stats-migration-chart-summary span{
+    color:#7f8da3;
+    font-size:9px;
+    font-weight:850;
+    letter-spacing:.06em;
+    text-transform:uppercase;
+}
+
+.stats-migration-chart-summary strong{
+    color:#eef3ff;
+    font-size:13px;
+}
+
+.stats-migration-chart-summary .migration-up{color:#7ce6aa!important;}
+.stats-migration-chart-summary .migration-down{color:#ff9aa3!important;}
+.stats-migration-chart-summary .migration-flat{color:#f8d47b!important;}
+
+.stats-migration-svg-wrap{
+    width:100%;
+    overflow-x:auto;
+    border:1px solid rgba(92,108,137,.16);
+    border-radius:11px;
+    background:linear-gradient(180deg,rgba(9,14,23,.96),rgba(7,11,18,.98));
+}
+
+.stats-migration-svg{
+    display:block;
+    width:100%;
+    min-width:650px;
+    height:auto;
+}
+
+.stats-migration-band{opacity:.12;}
+.stats-migration-band-low{fill:#4f7cff;}
+.stats-migration-band-mid{fill:#8b5cf6;}
+.stats-migration-band-high{fill:#ff7d8c;}
+.stats-migration-band-label{
+    fill:#75859e;
+    font-size:9px;
+    font-weight:800;
+    letter-spacing:.04em;
+}
+.stats-migration-grid{
+    stroke:rgba(135,151,178,.15);
+    stroke-width:1;
+    stroke-dasharray:3 5;
+}
+.stats-migration-axis{
+    stroke:rgba(151,168,194,.32);
+    stroke-width:1;
+}
+.stats-migration-axis-label{
+    fill:#708098;
+    font-size:8px;
+    font-weight:700;
+}
+.stats-migration-date-label{font-size:7.5px;}
+.stats-migration-series{
+    fill:none;
+    stroke:#6aaeff;
+    stroke-width:2.2;
+    stroke-linejoin:round;
+    stroke-linecap:round;
+}
+.stats-migration-point-dot{
+    fill:#d9e9ff;
+    stroke:#2c83df;
+    stroke-width:.8;
+}
+.stats-migration-trend-line{
+    stroke:#f7c65c;
+    stroke-width:2.3;
+    stroke-dasharray:7 5;
+    opacity:.95;
+}
+.stats-migration-arrow-head{fill:#f7c65c;}
+
+.stats-migration-legend{
+    display:flex!important;
+    align-items:center!important;
+    justify-content:flex-start!important;
+    flex-wrap:wrap;
+    gap:10px 18px!important;
+    padding:9px 2px 2px!important;
+    color:#8897ad;
+    font-size:9px!important;
+}
+.stats-migration-legend span{
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+}
+.stats-migration-legend i{
+    width:22px;
+    height:0;
+    display:inline-block;
+}
+.migration-line-swatch{border-top:2px solid #6aaeff;}
+.migration-trend-swatch{border-top:2px dashed #f7c65c;}
+
+.stats-migration-note{
+    margin:6px 0 0!important;
+    color:#75849b!important;
+    font-size:9px!important;
+    line-height:1.45!important;
+}
+
+.stats-migration-empty{
+    padding:14px;
+    border:1px dashed rgba(100,118,146,.25);
+    border-radius:9px;
+    color:#7f8da3;
+    font-size:11px;
+}
+
+@media(max-width:1050px){
+    .stats-view .stats-migration-chart-box{
+        grid-column:1 / -1;
+        max-width:none;
+    }
+}
+
+@media(max-width:700px){
+    .stats-migration-chart-summary{
+        grid-template-columns:repeat(2,minmax(0,1fr));
+    }
+}
+
+/* =========================================================
+   STATS — COLD COMEBACK / MARTWE POWROTY
+   ========================================================= */
+.stats-cold-comeback-panel{
+    width:100%;
+    padding:16px;
+    border:1px solid rgba(105,186,255,.22);
+    border-radius:15px;
+    background:linear-gradient(180deg,rgba(16,24,37,.96),rgba(9,14,23,.98));
+    box-shadow:0 10px 26px rgba(0,0,0,.18);
+}
+
+.cold-comeback-head{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:14px;
+    flex-wrap:wrap;
+    padding-bottom:12px;
+    border-bottom:1px solid rgba(105,186,255,.14);
+}
+
+.cold-comeback-head > div:first-child{
+    display:flex;
+    flex-direction:column;
+    gap:4px;
+}
+
+.cold-comeback-head > div:first-child > span{
+    color:#73c4ff;
+    font-size:11px;
+    font-weight:900;
+    letter-spacing:.08em;
+}
+
+.cold-comeback-head > div:first-child > strong{
+    color:#f3f7ff;
+    font-size:17px;
+}
+
+.cold-comeback-meta{
+    display:flex;
+    gap:8px;
+    flex-wrap:wrap;
+}
+
+.cold-comeback-meta span{
+    padding:6px 9px;
+    border-radius:999px;
+    background:#101827;
+    border:1px solid rgba(105,186,255,.16);
+    color:#93a6c0;
+    font-size:11px;
+}
+
+.cold-comeback-meta strong{color:#dcecff;}
+
+.cold-comeback-summary-grid{
+    display:grid;
+    grid-template-columns:repeat(4,minmax(130px,1fr));
+    gap:9px;
+    margin:12px 0 4px;
+}
+
+.cold-comeback-summary-grid > div{
+    padding:10px 11px;
+    border-radius:11px;
+    background:#0d1420;
+    border:1px solid rgba(93,116,150,.15);
+}
+
+.cold-comeback-summary-grid span{
+    display:block;
+    color:#7f90aa;
+    font-size:10px;
+    text-transform:uppercase;
+    letter-spacing:.05em;
+}
+
+.cold-comeback-summary-grid strong{
+    display:block;
+    margin-top:5px;
+    color:#f2f6ff;
+    font-size:18px;
+}
+
+.cold-comeback-section{
+    margin-top:14px;
+}
+
+.cold-comeback-section h4{
+    margin:0 0 8px;
+    color:#dce7f7;
+    font-size:13px;
+}
+
+.cold-comeback-latest{
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px;
+}
+
+.cold-comeback-chip{
+    min-width:125px;
+    padding:9px 10px;
+    border-radius:11px;
+    background:linear-gradient(180deg,rgba(20,39,57,.82),rgba(11,22,34,.88));
+    border:1px solid rgba(105,186,255,.22);
+    display:grid;
+    grid-template-columns:auto 1fr;
+    gap:2px 8px;
+    align-items:center;
+}
+
+.cold-comeback-chip.dead{
+    border-color:rgba(255,107,121,.35);
+    background:linear-gradient(180deg,rgba(53,25,35,.72),rgba(27,15,22,.86));
+}
+
+.cold-comeback-chip strong{
+    grid-row:1 / span 2;
+    font-size:20px;
+    color:#eef6ff;
+}
+
+.cold-comeback-chip span{
+    font-size:10px;
+    font-weight:900;
+    color:#78c5ff;
+}
+
+.cold-comeback-chip.dead span{color:#ff8f99;}
+.cold-comeback-chip small{color:#7f90a7;font-size:10px;}
+
+.cold-comeback-empty{
+    color:#7f90a7;
+    font-size:12px;
+    padding:9px 11px;
+    border:1px dashed rgba(105,186,255,.16);
+    border-radius:10px;
+}
+
+.cold-comeback-candidate-box{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:12px;
+    flex-wrap:wrap;
+    padding:11px 12px;
+    border-radius:11px;
+    border:1px solid rgba(124,92,255,.20);
+    background:linear-gradient(135deg,rgba(124,92,255,.07),rgba(62,166,255,.04));
+}
+
+.cold-comeback-candidate-box > div{
+    display:flex;
+    flex-direction:column;
+    gap:4px;
+}
+
+.cold-comeback-candidate-box span{color:#95a7c0;font-size:10px;text-transform:uppercase;letter-spacing:.05em;}
+.cold-comeback-candidate-box strong{color:#f1f5ff;font-size:14px;word-break:break-word;}
+.cold-comeback-candidate-box small{max-width:520px;color:#7f90a7;font-size:10px;line-height:1.45;}
+
+.cold-comeback-table{
+    min-width:760px;
+    margin:0!important;
+}
+
+.cold-state{
+    display:inline-block;
+    padding:3px 6px;
+    border-radius:999px;
+    font-size:9px;
+    font-weight:900;
+    white-space:nowrap;
+}
+
+.cold-state-cold{background:rgba(105,186,255,.10);color:#76c8ff;border:1px solid rgba(105,186,255,.20);}
+.cold-state-deep-cold{background:rgba(124,92,255,.11);color:#b5a4ff;border:1px solid rgba(124,92,255,.24);}
+.cold-state-dead{background:rgba(255,107,121,.11);color:#ff909a;border:1px solid rgba(255,107,121,.25);}
+.cold-row-dead td{background:rgba(255,107,121,.035)!important;}
+.cold-row-deep td{background:rgba(124,92,255,.025)!important;}
+
+.cold-comeback-note{
+    margin:10px 0 0!important;
+    color:#73839b!important;
+    font-size:10px!important;
+    line-height:1.45;
+}
+
+@media(max-width:900px){
+    .cold-comeback-summary-grid{grid-template-columns:repeat(2,minmax(130px,1fr));}
+}
+
+@media(max-width:560px){
+    .cold-comeback-summary-grid{grid-template-columns:1fr;}
+}
+
+/* =========================================================
+   AUTO FORGE — TEMPERATURE MIX / COLD+
+   ========================================================= */
+.af-status-cold-plus{
+    color:#9fe7ff;
+    border-color:rgba(96,205,255,.48);
+    background:linear-gradient(135deg,rgba(43,122,170,.16),rgba(102,92,255,.10));
+    box-shadow:inset 0 0 0 1px rgba(104,204,255,.05);
+}

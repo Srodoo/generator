@@ -5,7 +5,7 @@ const games = {
         max: 42,
         systemMin: 5,
         systemMax: 12,
-        ranges: [10,20,30,40,42]
+        ranges: [9,19,29,39,42]
     },
 
     lotto: {
@@ -14,7 +14,7 @@ const games = {
         max: 49,
         systemMin: 6,
         systemMax: 12,
-        ranges: [10,20,30,40,49]
+        ranges: [9,19,29,39,49]
     },
 
     euro: {
@@ -25,14 +25,14 @@ const games = {
     euroCount: 2,
     euroMax: 12,
 
-    ranges: [10,20,30,40,50]
+    ranges: [9,19,29,39,50]
 },
 
     multi: {
         title: "🎲 Generator Multi Multi",
         count: 10,
         max: 80,
-        ranges: [10,20,30,40,50,60,70,80]
+        ranges: [9,19,29,39,49,59,69,80]
     },
 
     extra: {
@@ -43,7 +43,7 @@ const games = {
     extraCount: 1,
     extraMax: 4,
 
-    ranges: [10,20,30,35]
+    ranges: [9,19,29,35]
 }
 };
 function getMinPossibleSum(count) {
@@ -502,6 +502,7 @@ const contentArea = document.getElementById("contentArea");
 
 
 function showGame(){
+contentArea.classList.remove("stats-view");
 const labels = currentGame.ranges.map((value, index) => {
 
     const start = index === 0
@@ -582,7 +583,7 @@ ${isSystemGame() ? `
             🧩 TEST 8 × 10 — pokryj całą planszę 1–80
         </label>
         <select id="multiCoverageStyle">
-            <option value="sector">Sektorowo — jedna dziesiątka na kupon</option>
+            <option value="sector">Blokowo 8×10 — 1–10, 11–20, …, 71–80</option>
             <option value="mixed">Mieszane — losowy podział 1–80 bez powtórzeń</option>
         </select>
         <small>
@@ -634,6 +635,12 @@ ${currentGame === games.extra ? `
 
 
 <h3>Struktura</h3>
+<div class="structure-scheme-hint">
+    ${currentGame.ranges.map((value, index) => {
+        const start = index === 0 ? 1 : currentGame.ranges[index - 1] + 1;
+        return `${start}-${value}`;
+    }).join(" • ")}
+</div>
 
 ${currentGame.ranges.map((value,index)=>{
 
@@ -963,7 +970,7 @@ function updateTicketBatchInfo() {
 
     if (isMultiCoverageMode()) {
         const style = getMultiCoverageStyle() === "sector"
-            ? "sektorowo: 1–10, 11–20, …, 71–80"
+            ? "blokowo: 1–10, 11–20, …, 71–80"
             : "mieszane: losowy podział 1–80 bez powtórzeń";
         info.innerHTML = `
             <strong>Pokrycie pełne:</strong> 8 kuponów × 10 liczb • ${style}.
@@ -1090,18 +1097,29 @@ function generateMultiCoverageTickets(analysis = null) {
     let rawTickets = [];
 
     if (style === "sector") {
-        rawTickets = currentGame.ranges.map((end, index) => {
-            const start = index === 0 ? 1 : currentGame.ranges[index - 1] + 1;
-            return Array.from({ length: end - start + 1 }, (_, offset) => start + offset);
+        // UWAGA: to są BLOKI POKRYCIA 8×10, a nie sektory struktury.
+        // Struktura analityczna działa teraz wg:
+        // 1-9 | 10-19 | 20-29 | 30-39 | 40-49 | 50-59 | 60-69 | 70-80.
+        // Tryb pokrycia musi jednak zachować dokładnie 8 kuponów po 10 liczb,
+        // dlatego używa stałych bloków 1-10, 11-20, ..., 71-80.
+        rawTickets = Array.from({ length: 8 }, (_, index) => {
+            const start = index * 10 + 1;
+            const end = start + 9;
+            return Array.from({ length: 10 }, (_, offset) => start + offset);
         });
 
-        // Jeżeli AUTO FORGE jest po analizie, tylko ustawiamy kolejność kart od
-        // najmocniejszego sektora. Same liczby nadal pokrywają 1–80 dokładnie raz.
-        if (analysis?.activeSectors?.length) {
-            const rank = new Map(analysis.activeSectors.map((sector, index) => [sector.index, index]));
+        // Jeśli AUTO FORGE jest po analizie, możemy jedynie ustawić kolejność
+        // bloków od najbardziej aktywnego. Pokrycie 1-80 pozostaje bez zmian.
+        if (Array.isArray(analysis?.sectorScores) && analysis.sectorScores.length) {
             rawTickets = rawTickets
-                .map((numbers, index) => ({ numbers, index }))
-                .sort((a, b) => (rank.get(a.index) ?? 999) - (rank.get(b.index) ?? 999))
+                .map(numbers => ({
+                    numbers,
+                    score: numbers.reduce(
+                        (sum, number) => sum + (analysis.sectorScores[getSectorIndex(number)] || 0),
+                        0
+                    ) / numbers.length
+                }))
+                .sort((a, b) => b.score - a.score)
                 .map(item => item.numbers);
         }
     } else {
@@ -1122,7 +1140,7 @@ function generateMultiCoverageBatch(analysis = null, profile = null) {
         coverage: true,
         title: "TEST 8 × 10 — pełne pokrycie 1–80",
         subtitle: profile
-            ? `${profile.icon || "🎯"} ${profile.label || "AUTO FORGE"} • tryb pokrycia zastępuje strukturę pojedynczego kuponu, bo cały pakiet musi wykorzystać każdą liczbę dokładnie raz.`
+            ? `${profile.icon || "🎯"} ${profile.label || "AUTO FORGE"} • tryb pokrycia zastępuje strukturę pojedynczego kuponu, bo cały pakiet musi wykorzystać każdą liczbę dokładnie raz. Bloki 8×10 są niezależne od nowych sektorów struktury.`
             : "Tryb pokrycia jest testem całej planszy; ręczne wykluczenia i struktura pojedynczego kuponu nie są tu stosowane."
     });
 
@@ -1131,7 +1149,7 @@ function generateMultiCoverageBatch(analysis = null, profile = null) {
         result.innerHTML = `
             <div class="auto-forge-generation-result">
                 <strong>🧩 Wygenerowano 8 kuponów pokrywających 1–80.</strong>
-                <p>Najmocniejsze sektory są pokazane jako pierwsze w wariancie sektorowym. Każda liczba występuje dokładnie raz w całym pakiecie.</p>
+                <p>W wariancie blokowym kupony nadal mają po 10 liczb i razem pokrywają 1–80 dokładnie raz. Bloki mogą być ustawione od najbardziej aktywnego według bieżącej analizy.</p>
             </div>
         `;
     }
@@ -1250,9 +1268,9 @@ function getSectorLabel(index) {
 function getAutoForgeBands() {
     if (currentGame === games.multi) {
         return [
-            { key: "LOW", label: "LOW", start: 1, end: 30 },
-            { key: "MID", label: "MID", start: 31, end: 50 },
-            { key: "HIGH", label: "HIGH", start: 51, end: 80 }
+            { key: "LOW", label: "LOW", start: 1, end: 29 },
+            { key: "MID", label: "MID", start: 30, end: 49 },
+            { key: "HIGH", label: "HIGH", start: 50, end: 80 }
         ];
     }
 
@@ -1797,6 +1815,158 @@ function getPatternScore(scoreMap, numbers) {
     return scoreMap.get(getCombinationKey(numbers)) || 0;
 }
 
+function getAutoForgeTemperatureBudget(targetCount = getAutoForgeTargetCount()) {
+    const count = Math.max(0, Number(targetCount) || 0);
+
+    // Docelowy miks dla AUTO FORGE. Dla najczęściej używanych wielkości
+    // stosujemy gotowe proporcje, żeby HOT nie zjadał całego kuponu.
+    // Układ jest zbliżony do 45% HOT / 35% MID / 20% COLD+.
+    const presets = {
+        0: [0, 0, 0],
+        1: [1, 0, 0],
+        2: [1, 1, 0],
+        3: [1, 1, 1],
+        4: [2, 1, 1],
+        5: [2, 2, 1],
+        6: [3, 2, 1],
+        7: [3, 3, 1],
+        8: [3, 3, 2],
+        9: [4, 3, 2],
+        10: [5, 3, 2],
+        11: [5, 4, 2],
+        12: [5, 4, 3]
+    };
+
+    if (presets[count]) {
+        const [hot, mid, promising] = presets[count];
+        return { hot, mid, promising, total: count };
+    }
+
+    const raw = {
+        hot: count * 0.45,
+        mid: count * 0.35,
+        promising: count * 0.20
+    };
+    const result = {
+        hot: Math.floor(raw.hot),
+        mid: Math.floor(raw.mid),
+        promising: Math.floor(raw.promising)
+    };
+    let remaining = count - result.hot - result.mid - result.promising;
+    const order = [
+        { key: "promising", fraction: raw.promising - Math.floor(raw.promising), priority: 3 },
+        { key: "mid", fraction: raw.mid - Math.floor(raw.mid), priority: 2 },
+        { key: "hot", fraction: raw.hot - Math.floor(raw.hot), priority: 1 }
+    ].sort((a, b) => b.fraction - a.fraction || b.priority - a.priority);
+
+    let cursor = 0;
+    while (remaining > 0) {
+        result[order[cursor % order.length].key]++;
+        remaining--;
+        cursor++;
+    }
+
+    return { ...result, total: count };
+}
+
+function getAutoForgeTemperatureBudgetText(budget) {
+    if (!budget) return "—";
+    return `HOT ${budget.hot} • MID ${budget.mid} • COLD+ ${budget.promising}`;
+}
+
+function buildAutoForgePromisingColdCandidates({
+    coldComebackAnalysis,
+    sectorScores,
+    focusKeys,
+    patternModel,
+    direction,
+    migrationStrength,
+    bands,
+    deadExclusionCandidates = []
+}) {
+    const ranking = coldComebackAnalysis?.currentRanking || [];
+    if (!ranking.length) return [];
+
+    const maxSectorScore = Math.max(...(sectorScores || []), 0.0001);
+    const deadSet = new Set(deadExclusionCandidates || []);
+    const eventsByNumber = new Map();
+
+    (coldComebackAnalysis?.events || []).forEach(event => {
+        if (!eventsByNumber.has(event.number)) eventsByNumber.set(event.number, []);
+        eventsByNumber.get(event.number).push(event.priorDrought || 0);
+    });
+
+    return ranking
+        .map(item => {
+            const number = item.number;
+            const sector = getSectorIndex(number);
+            const sectorNorm = clamp((sectorScores?.[sector] || 0) / maxSectorScore, 0, 1);
+            const band = bands[getBandIndex(number)];
+            const focusFit = focusKeys.includes(band.key) ? 1 : sectorNorm * 0.45;
+            const position = ((number - 1) / Math.max(1, currentGame.max - 1)) * 2 - 1;
+            const migrationAlignment = direction === 0
+                ? 0.5
+                : clamp((1 + direction * position) / 2, 0, 1);
+
+            const baseline = Math.max(0.01, coldComebackAnalysis.config?.hitProbability || 0.10);
+            const coldComebackRelative = clamp(item.coldRate / baseline, 0, 1);
+            const deadComebackRelative = clamp(item.deadRate / baseline, 0, 1);
+            const comebackSignal = item.status === "DEAD"
+                ? Math.max(coldComebackRelative * 0.75, deadComebackRelative)
+                : coldComebackRelative;
+
+            const relationSignal = clamp(
+                (patternModel?.pairCentrality?.[number] || 0) * 0.55 +
+                (patternModel?.tripleCentrality?.[number] || 0) * 0.30 +
+                (patternModel?.quadCentrality?.[number] || 0) * 0.15,
+                0,
+                1
+            );
+
+            const comebackGaps = eventsByNumber.get(number) || [];
+            const averageGap = comebackGaps.length ? average(comebackGaps) : 0;
+            const rhythmTolerance = Math.max(2, averageGap * 0.60);
+            const rhythmFit = comebackGaps.length
+                ? clamp(1 - Math.abs(item.drought - averageGap) / rhythmTolerance, 0, 1)
+                : 0;
+
+            const directionFit = clamp(
+                focusFit * 0.65 + migrationAlignment * (0.35 + migrationStrength * 0.15),
+                0,
+                1
+            );
+
+            const score = Math.round(clamp(
+                sectorNorm * 35 +
+                comebackSignal * 25 +
+                relationSignal * 20 +
+                directionFit * 10 +
+                rhythmFit * 10,
+                0,
+                100
+            ));
+
+            return {
+                number,
+                score,
+                status: item.status,
+                sector: getSectorLabel(sector),
+                sectorNorm,
+                coldRate: item.coldRate,
+                deadRate: item.deadRate,
+                drought: item.drought,
+                comebackCount: item.coldComebacks,
+                comebackOpportunities: item.coldOpportunities,
+                relationSignal,
+                rhythmFit,
+                averageComebackGap: averageGap,
+                protectedFromAutoCut: item.status === "DEAD" && !deadSet.has(number)
+            };
+        })
+        .filter(item => !deadSet.has(item.number))
+        .sort((a, b) => b.score - a.score || b.sectorNorm - a.sectorNorm || a.number - b.number);
+}
+
 function buildAutoForgeAnalysis() {
     const draws = getCurrentGameDraws();
     const targetCount = getAutoForgeTargetCount();
@@ -2134,8 +2304,62 @@ function buildAutoForgeAnalysis() {
         .slice(0, Math.min(coldPoolSize, trendRankedNumbers.length));
     const coldSet = new Set(coldPool);
 
+    // Twarde wykluczenie AUTO FORGE nie opiera się już na zwykłym TOP COLD.
+    // Kandydat musi być aktualnie DEAD i historycznie rzadko wracać po stanie DEAD.
+    const coldComebackAnalysis = buildStatsColdComebackAnalysis(
+        draws,
+        Math.max(...requestedWindows, 20)
+    );
+    const deadExclusionCandidates = (coldComebackAnalysis.currentRanking || [])
+        .filter(item => {
+            const enoughDeadHistory = item.deadOpportunities >= 3;
+            const lowDeadComebackRate = item.deadRate <= coldComebackAnalysis.config.hitProbability * 0.50;
+
+            return (
+                item.status === "DEAD" &&
+                item.exclusionScore >= 78 &&
+                enoughDeadHistory &&
+                lowDeadComebackRate
+            );
+        })
+        .map(item => item.number);
+
+    // COLD+ = zimna liczba, która mimo słabszej częstotliwości ma argumenty do powrotu:
+    // aktywny sektor, historyczne comebacki, relacje, zgodność z kierunkiem i rytm przerwy.
+    // Nie każdy COLD dostaje ten status i żaden twardy AUTO CUT nie może być COLD+.
+    const promisingColdCandidates = buildAutoForgePromisingColdCandidates({
+        coldComebackAnalysis,
+        sectorScores,
+        focusKeys,
+        patternModel,
+        direction,
+        migrationStrength,
+        bands,
+        deadExclusionCandidates
+    });
+    const promisingColdThreshold = 55;
+    const promisingColdPool = promisingColdCandidates
+        .filter(item => item.score >= promisingColdThreshold)
+        .map(item => item.number);
+    const promisingColdMap = new Map(
+        promisingColdCandidates.map(item => [item.number, item])
+    );
+    const promisingColdSet = new Set(promisingColdPool);
+
+    // MID to środek rankingu: nie HOT, nie TOP COLD i nie COLD+.
+    // Dzięki osobnemu koszykowi MID nie konkuruje bezpośrednio z premią HOT.
+    const midPool = [];
+    for (let n = 1; n <= currentGame.max; n++) {
+        if (!hotSet.has(n) && !coldSet.has(n) && !promisingColdSet.has(n)) {
+            midPool.push(n);
+        }
+    }
+
+    const temperatureBudget = getAutoForgeTemperatureBudget(targetCount);
+
     // AUTO SCORE konkretnej liczby. Geografia planszy ma najwyższy priorytet,
-    // potem HOT/MID/COLD, powroty i relacje. Losowość zostaje dopiero na końcu.
+    // potem status temperatury, powroty i relacje. Sam status HOT nie może już
+    // wygrywać całego kuponu — liczbę miejsc kontroluje osobny budżet HOT/MID/COLD+.
     const maxSectorScore = Math.max(...sectorScores, 0.0001);
     const maxFrequency = Math.max(...frequencyScore.slice(1), 0.0001);
     const latestSet = new Set(patternModel.latestNumbers);
@@ -2151,14 +2375,25 @@ function buildAutoForgeAnalysis() {
         const frequencyNorm = frequencyScore[n] / maxFrequency;
         const isHot = hotSet.has(n);
         const isCold = coldSet.has(n);
+        const isPromisingCold = promisingColdSet.has(n);
+        const promisingCold = promisingColdMap.get(n) || null;
         const isLatest = latestSet.has(n);
 
         const sectorComponent = sectorNorm * 35;
-        // COLD jest wagą liczby, a nie wyrokiem dla całego aktywnego sektora.
-        // Im mocniejsze ognisko, tym słabsza kara za COLD — dzięki temu zimna
-        // liczba z gorącej dziesiątki może zrobić comeback i nadal wejść do kuponu.
+        // HOT dostaje premię, ale dużo mniejszą niż wcześniej — o liczbie miejsc HOT
+        // decyduje teraz budżet temperatury. COLD+ dostaje własny bonus za jakość
+        // comebacku, a zwykły COLD nadal tylko miękką karę zależną od sektora.
         const coldPenalty = -18 * (1 - 0.85 * sectorNorm);
-        const hotColdComponent = isHot ? 20 : isCold ? coldPenalty : frequencyNorm * 10;
+        const promisingBonus = isPromisingCold
+            ? (promisingCold?.score || 0) / 100 * 12
+            : 0;
+        const hotColdComponent = isHot
+            ? 11
+            : isPromisingCold
+                ? (-4 * (1 - sectorNorm) + promisingBonus)
+                : isCold
+                    ? coldPenalty
+                    : frequencyNorm * 10;
         const returnComponent = isLatest ? patternModel.returnScores[n] * 15 : 0;
         const pairComponent = patternModel.pairCentrality[n] * 12;
         const tripleComponent = patternModel.tripleCentrality[n] * 7;
@@ -2191,7 +2426,8 @@ function buildAutoForgeAnalysis() {
             migration: migrationComponent,
             parity: parityComponent,
             focus: focusComponent,
-            status: isHot ? "HOT" : isCold ? "COLD" : "MID",
+            status: isHot ? "HOT" : isPromisingCold ? "COLD+" : isCold ? "COLD" : "MID",
+            promisingColdScore: promisingCold?.score || 0,
             returnRate: isLatest ? patternModel.returnScores[n] : 0,
             isLatest
         };
@@ -2305,7 +2541,14 @@ function buildAutoForgeAnalysis() {
         suggestedOdd,
         focusEvenShare,
         hotPool,
+        midPool,
         coldPool,
+        promisingColdPool,
+        promisingColdCandidates,
+        promisingColdThreshold,
+        temperatureBudget,
+        coldComebackAnalysis,
+        deadExclusionCandidates,
         rankedNumbers,
         numberScores,
         numberComponents,
@@ -2328,32 +2571,9 @@ function buildAutoForgeGenerationPlan(analysis, profile = null) {
         ? [...profile.structure]
         : [...analysis.structure];
 
-    // HOT oznacza wyłącznie prawdziwy TOP HOT z diagnozy.
-    // Szerszy ranking liczbowy jest osobnym mechanizmem i nie miesza etykiet.
-    const hotPool = [...(analysis.hotPool || [])];
-    const hotBySector = new Array(currentGame.ranges.length).fill(0);
-    hotPool.forEach(number => hotBySector[getSectorIndex(number)]++);
-
-    const maxHotThatFits = selectedStructure.reduce(
-        (sum, quota, index) => sum + Math.min(quota, hotBySector[index]),
-        0
-    );
-
-    const hotRatio = analysis.signalStrength >= 0.68
-        ? 0.55
-        : analysis.signalStrength >= 0.42
-            ? 0.45
-            : 0.35;
-
-    const hotCount = clamp(
-        Math.min(
-            Math.round(analysis.targetCount * hotRatio),
-            maxHotThatFits,
-            hotPool.length
-        ),
-        0,
-        analysis.targetCount
-    );
+    const temperatureBudget = {
+        ...(analysis.temperatureBudget || getAutoForgeTemperatureBudget(analysis.targetCount))
+    };
 
     return {
         analysis,
@@ -2362,9 +2582,17 @@ function buildAutoForgeGenerationPlan(analysis, profile = null) {
         profileLabel: profile?.label || "PROFILOWY",
         profileIcon: profile?.icon || "🧭",
         structure: selectedStructure,
-        hotPool,
-        hotCount,
+
+        // Trzy osobne koszyki. HOT nie rezerwuje już ponad połowy kuponu.
+        hotPool: [...(analysis.hotPool || [])],
+        midPool: [...(analysis.midPool || [])],
+        promisingColdPool: [...(analysis.promisingColdPool || [])],
+        promisingColdCandidates: [...(analysis.promisingColdCandidates || [])],
+        promisingColdThreshold: analysis.promisingColdThreshold ?? 55,
+        temperatureBudget,
+
         coldPool: [...(analysis.coldPool || [])],
+        deadExclusionPool: [...(analysis.deadExclusionCandidates || [])],
         numberScores: analysis.numberScores || [],
         numberComponents: analysis.numberComponents || [],
         patternModel: analysis.patternModel || null,
@@ -2372,18 +2600,186 @@ function buildAutoForgeGenerationPlan(analysis, profile = null) {
         suggestedEven: analysis.suggestedEven,
         suggestedOdd: analysis.suggestedOdd,
         suggestedReturnCount: analysis.suggestedReturnCount || 0,
-        lastSelectedHotNumbers: [],
-        lastColdPoolUsed: [],
+
+        lastTemperatureTargets: { ...temperatureBudget },
+        lastTemperatureMix: { hot: 0, mid: 0, promising: 0, cold: 0 },
+        lastSelectedTemperatureNumbers: [],
+        lastDeadPoolUsed: [],
         selectionTrace: []
     };
 }
 
-function getSafeAutoForgeColdPool(plan, manualExcludedNumbers = [], manualRequiredPool = []) {
+function getAutoForgeTemperatureBucket(number, plan) {
+    if (!plan) return "MID";
+
+    if ((plan.hotPool || []).includes(number)) return "HOT";
+    if ((plan.promisingColdPool || []).includes(number)) return "PROMISING";
+    if ((plan.coldPool || []).includes(number)) return "COLD";
+    return "MID";
+}
+
+function countAutoForgeTemperatureMix(numbers, plan) {
+    const mix = { hot: 0, mid: 0, promising: 0, cold: 0 };
+    (numbers || []).forEach(number => {
+        const bucket = getAutoForgeTemperatureBucket(number, plan);
+        if (bucket === "HOT") mix.hot++;
+        else if (bucket === "PROMISING") mix.promising++;
+        else if (bucket === "COLD") mix.cold++;
+        else mix.mid++;
+    });
+    return mix;
+}
+
+function getAutoForgeTemperaturePool(plan, bucket) {
+    if (!plan) return [];
+    if (bucket === "HOT") return plan.hotPool || [];
+    if (bucket === "MID") return plan.midPool || [];
+    if (bucket === "PROMISING") return plan.promisingColdPool || [];
+    return [];
+}
+
+function getAutoForgeTemperatureNeed(targets, mix, bucket) {
+    const key = bucket === "HOT" ? "hot" : bucket === "MID" ? "mid" : "promising";
+    return Math.max(0, (targets?.[key] || 0) - (mix?.[key] || 0));
+}
+
+function trimAutoForgeTemperatureTargetsForManualNumbers(targets, mix, targetCount, manualCount) {
+    const adjusted = { ...targets };
+    const autoSlots = Math.max(0, targetCount - manualCount);
+    const needs = {
+        hot: Math.max(0, adjusted.hot - mix.hot),
+        mid: Math.max(0, adjusted.mid - mix.mid),
+        promising: Math.max(0, adjusted.promising - mix.promising)
+    };
+
+    let totalNeeds = needs.hot + needs.mid + needs.promising;
+    let overflow = Math.max(0, totalNeeds - autoSlots);
+
+    // Gdy użytkownik ręcznie wymusił liczby spoza planu, to najpierw oddajemy
+    // miejsca z HOT, potem z MID. Slot COLD+ zostawiamy najdłużej, bo jest najmniejszy.
+    for (const key of ["hot", "mid", "promising"]) {
+        while (overflow > 0 && adjusted[key] > mix[key]) {
+            adjusted[key]--;
+            overflow--;
+        }
+    }
+
+    return adjusted;
+}
+
+function drawAutoForgeTemperatureNumbers(
+    plan,
+    existingRequired = [],
+    blockedRequired = [],
+    excludedNumbers = []
+) {
+    if (!plan) return [];
+
+    const selected = [];
+    const blockedSet = new Set(blockedRequired);
+    const excludedSet = new Set(excludedNumbers);
+    const selectedSet = new Set(existingRequired);
+    const sectorUsed = new Array(currentGame.ranges.length).fill(0);
+    existingRequired.forEach(number => sectorUsed[getSectorIndex(number)]++);
+
+    let mix = countAutoForgeTemperatureMix(existingRequired, plan);
+    let targets = trimAutoForgeTemperatureTargetsForManualNumbers(
+        plan.temperatureBudget || getAutoForgeTemperatureBudget(plan.targetCount),
+        mix,
+        plan.targetCount,
+        existingRequired.length
+    );
+
+    const autoSlots = Math.max(0, plan.targetCount - existingRequired.length);
+
+    const availableForBucket = bucket => getAutoForgeTemperaturePool(plan, bucket)
+        .filter(number =>
+            !selectedSet.has(number) &&
+            !blockedSet.has(number) &&
+            !excludedSet.has(number)
+        );
+
+    function pickOne(bucket) {
+        const pool = availableForBucket(bucket).filter(number => {
+            if (selected.includes(number)) return false;
+            const sector = getSectorIndex(number);
+            return sectorUsed[sector] < (plan.structure[sector] || 0);
+        });
+
+        if (!pool.length) return null;
+
+        const selectedContext = [...existingRequired, ...selected];
+        let candidatePool = filterAutoForgePoolByParity(pool, plan, selectedContext);
+        if (!candidatePool.length) candidatePool = pool;
+
+        const index = getAutoForgeWeightedRandomIndex(
+            candidatePool,
+            plan,
+            selectedContext
+        );
+        if (index < 0) return null;
+
+        const number = candidatePool[index];
+        selected.push(number);
+        selectedSet.add(number);
+        sectorUsed[getSectorIndex(number)]++;
+        traceAutoForgeSelection(plan, number, bucket === "PROMISING" ? "COLD+" : bucket, selectedContext);
+        mix = countAutoForgeTemperatureMix([...existingRequired, ...selected], plan);
+        return number;
+    }
+
+    function fillBucket(bucket) {
+        let guard = 0;
+        while (
+            selected.length < autoSlots &&
+            getAutoForgeTemperatureNeed(targets, mix, bucket) > 0 &&
+            guard < 100
+        ) {
+            if (pickOne(bucket) === null) break;
+            guard++;
+        }
+    }
+
+    // Najpierw najrzadszy koszyk COLD+, potem MID, a HOT na końcu.
+    // Dzięki temu HOT nie zajmuje sektorów, zanim MID/COLD+ dostaną swoją szansę.
+    fillBucket("PROMISING");
+    const promisingShortage = getAutoForgeTemperatureNeed(targets, mix, "PROMISING");
+    if (promisingShortage > 0) {
+        targets.promising -= promisingShortage;
+        targets.mid += promisingShortage; // brak sensownego COLD+ => slot przechodzi na MID
+    }
+
+    fillBucket("MID");
+    const midShortage = getAutoForgeTemperatureNeed(targets, mix, "MID");
+    if (midShortage > 0) {
+        targets.mid -= midShortage;
+        targets.hot += midShortage;
+    }
+
+    fillBucket("HOT");
+    const hotShortage = getAutoForgeTemperatureNeed(targets, mix, "HOT");
+    if (hotShortage > 0) {
+        targets.hot -= hotShortage;
+        targets.mid += hotShortage;
+        fillBucket("MID");
+    }
+
+    // Jeżeli struktura lub ręczne filtry nadal blokują część miksu, próbujemy
+    // jeszcze raz COLD+ i HOT. Resztę później uzupełni ranking ogólny.
+    fillBucket("PROMISING");
+    fillBucket("HOT");
+
+    plan.lastTemperatureTargets = { ...targets };
+    plan.lastSelectedTemperatureNumbers = [...selected];
+    return selected;
+}
+
+function getSafeAutoForgeDeadPool(plan, manualExcludedNumbers = [], manualRequiredPool = []) {
     if (!plan) return [];
 
     const manualExcludedSet = new Set(manualExcludedNumbers);
     const manualRequiredSet = new Set(manualRequiredPool);
-    const safeCold = [];
+    const safeDead = [];
     const sectorScores = plan.sectorScores || [];
     const maxSectorScore = Math.max(...sectorScores, 0.0001);
     const topSectorSet = new Set(
@@ -2394,7 +2790,9 @@ function getSafeAutoForgeColdPool(plan, manualExcludedNumbers = [], manualRequir
             .map(item => item.index)
     );
 
-    for (const number of plan.coldPool) {
+    // Ważne: zwykły COLD zostaje tylko miękką karą w scoringu.
+    // Do twardego AUTO CUT trafiają wyłącznie liczby DEAD z niskim comebackiem.
+    for (const number of (plan.deadExclusionPool || [])) {
         if (manualRequiredSet.has(number) || manualExcludedSet.has(number)) continue;
 
         const sector = getSectorIndex(number);
@@ -2405,25 +2803,25 @@ function getSafeAutoForgeColdPool(plan, manualExcludedNumbers = [], manualRequir
             sectorNorm >= 0.68 ||
             quota >= 2;
 
-        // Najważniejsza zasada: COLD nie wycina liczb z gorącego sektora.
-        // Tam działa tylko jako delikatna kara w AUTO SCORE.
+        // Hierarchia pozostaje bez zmian: bardzo aktywny sektor ma pierwszeństwo
+        // nawet nad etykietą DEAD. Wtedy liczba dostaje karę, ale nie jest blokowana.
         if (isProtectedHotSector) continue;
 
         const bounds = getSectorBounds(sector);
         const unavailableManual = [...manualExcludedSet]
             .filter(n => getSectorIndex(n) === sector).length;
-        const unavailableAuto = safeCold
+        const unavailableAuto = safeDead
             .filter(n => getSectorIndex(n) === sector).length;
 
         const availableAfterExclusion =
             bounds.capacity - unavailableManual - unavailableAuto - 1;
 
         if (availableAfterExclusion >= quota) {
-            safeCold.push(number);
+            safeDead.push(number);
         }
     }
 
-    return safeCold;
+    return safeDead;
 }
 
 function getBestPatternMatch(number, selectedNumbers, size, scoreMap, maxScore) {
@@ -2474,17 +2872,28 @@ function filterAutoForgePoolByParity(pool, plan, selectedNumbers = []) {
 function getAutoForgeCandidateScore(number, plan, selectedNumbers = []) {
     const base = Math.max(0.01, Number(plan?.numberScores?.[number]) || 0.01);
     const pattern = plan?.patternModel;
+    const bucket = getAutoForgeTemperatureBucket(number, plan);
+    const mix = countAutoForgeTemperatureMix(selectedNumbers, plan);
+    const targets = plan?.lastTemperatureTargets || plan?.temperatureBudget || { hot: 0, mid: 0, promising: 0 };
+    const temperatureNeed = getAutoForgeTemperatureNeed(targets, mix, bucket);
+    const temperatureBoost =
+        bucket === "PROMISING" ? (temperatureNeed > 0 ? 12 : -2) :
+        bucket === "MID" ? (temperatureNeed > 0 ? 9 : -3) :
+        bucket === "HOT" ? (temperatureNeed > 0 ? 4 : -12) :
+        -10;
 
     if (!pattern) {
         return {
-            score: base,
+            score: Math.max(0.01, base + temperatureBoost),
             base,
             pair: { raw: 0, normalized: 0, numbers: [] },
             triple: { raw: 0, normalized: 0, numbers: [] },
             quad: { raw: 0, normalized: 0, numbers: [] },
             returnRate: 0,
             returnBoost: 0,
-            parityBoost: 0
+            parityBoost: 0,
+            temperatureBoost,
+            temperatureBucket: bucket
         };
     }
 
@@ -2539,7 +2948,8 @@ function getAutoForgeCandidateScore(number, plan, selectedNumbers = []) {
         triple.normalized * 10 +
         quad.normalized * 5 +
         returnBoost +
-        parityBoost
+        parityBoost +
+        temperatureBoost
     );
 
     return {
@@ -2550,7 +2960,9 @@ function getAutoForgeCandidateScore(number, plan, selectedNumbers = []) {
         quad,
         returnRate,
         returnBoost,
-        parityBoost
+        parityBoost,
+        temperatureBoost,
+        temperatureBucket: bucket
     };
 }
 
@@ -2635,6 +3047,9 @@ function buildAutoForgeTicketExplanations(numbers, plan) {
 
         const reasons = [`sektor ${getSectorLabel(getSectorIndex(number))}`];
         if (component.status === "HOT") reasons.unshift("HOT");
+        if (component.status === "COLD+") {
+            reasons.unshift(`COLD+ ${component.promisingColdScore || 0}/100`);
+        }
         if (component.isLatest && component.returnRate > 0) {
             reasons.push(`powrót ${Math.round(component.returnRate * 100)}%`);
         }
@@ -2649,6 +3064,8 @@ function buildAutoForgeTicketExplanations(numbers, plan) {
             number,
             sector: getSectorLabel(getSectorIndex(number)),
             status: component.status || "MID",
+            statusKey: component.status === "COLD+" ? "cold-plus" : String(component.status || "MID").toLowerCase(),
+            promisingColdScore: component.promisingColdScore || 0,
             returnRate: component.isLatest ? component.returnRate || 0 : null,
             relations: relations.slice(0, 2),
             reasons,
@@ -2686,68 +3103,6 @@ function getWeightedRandomIndex(pool, numberScores = []) {
     return pool.length - 1;
 }
 
-function drawAutoForgeHotNumbers(
-    plan,
-    existingRequired = [],
-    blockedRequired = [],
-    excludedNumbers = []
-) {
-    if (!plan || plan.hotCount <= 0) return [];
-
-    const hotSet = new Set(plan.hotPool);
-    const alreadyHot = existingRequired.filter(number => hotSet.has(number)).length;
-    let needed = Math.max(0, plan.hotCount - alreadyHot);
-    if (!needed) return [];
-
-    const blockedSet = new Set(blockedRequired);
-    const excludedSet = new Set(excludedNumbers);
-    const selectedSet = new Set(existingRequired);
-    const sectorUsed = new Array(currentGame.ranges.length).fill(0);
-
-    existingRequired.forEach(number => sectorUsed[getSectorIndex(number)]++);
-
-    const available = plan.hotPool.filter(number =>
-        !selectedSet.has(number) &&
-        !blockedSet.has(number) &&
-        !excludedSet.has(number)
-    );
-
-    const selected = [];
-
-    while (needed > 0 && available.length) {
-        const selectedContext = [...existingRequired, ...selected];
-        let allowed = available.filter(number => {
-            const sector = getSectorIndex(number);
-            return sectorUsed[sector] < (plan.structure[sector] || 0);
-        });
-
-        if (!allowed.length) break;
-
-        const parityAllowed = filterAutoForgePoolByParity(
-            allowed,
-            plan,
-            selectedContext
-        );
-        if (parityAllowed.length) allowed = parityAllowed;
-
-        const allowedIndex = getAutoForgeWeightedRandomIndex(
-            allowed,
-            plan,
-            selectedContext
-        );
-        const number = allowed[allowedIndex];
-        const originalIndex = available.indexOf(number);
-        if (originalIndex >= 0) available.splice(originalIndex, 1);
-
-        traceAutoForgeSelection(plan, number, "HOT", selectedContext);
-        selected.push(number);
-        sectorUsed[getSectorIndex(number)]++;
-        needed--;
-    }
-
-    return selected;
-}
-
 function applyAutoForgeProfileToControls(analysis, structureOverride = null) {
     const selectedStructure = Array.isArray(structureOverride)
         ? structureOverride
@@ -2779,8 +3134,12 @@ function renderAutoForgeGenerationResult(analysis, plan, numbers) {
     const container = document.getElementById("autoForgeGenerationResult");
     if (!container || !Array.isArray(numbers)) return;
 
-    const hotSet = new Set(plan.hotPool);
-    const hotOnTicket = numbers.filter(number => hotSet.has(number));
+    const hotOnTicket = numbers.filter(number => getAutoForgeTemperatureBucket(number, plan) === "HOT");
+    const midOnTicket = numbers.filter(number => getAutoForgeTemperatureBucket(number, plan) === "MID");
+    const promisingOnTicket = numbers.filter(number => getAutoForgeTemperatureBucket(number, plan) === "PROMISING");
+    const regularColdOnTicket = numbers.filter(number => getAutoForgeTemperatureBucket(number, plan) === "COLD");
+    const baseTemperatureBudget = plan.temperatureBudget || getAutoForgeTemperatureBudget(numbers.length);
+    const temperatureTargets = plan.lastTemperatureTargets || baseTemperatureBudget;
     const structure = getStructureForNumbers(numbers);
     const even = numbers.filter(number => number % 2 === 0).length;
     const odd = numbers.length - even;
@@ -2792,7 +3151,7 @@ function renderAutoForgeGenerationResult(analysis, plan, numbers) {
         <tr>
             <td><strong>${String(row.number).padStart(2, "0")}</strong></td>
             <td>${row.sector}</td>
-            <td><span class="af-status af-status-${row.status.toLowerCase()}">${row.status}</span></td>
+            <td><span class="af-status af-status-${row.statusKey}">${row.status}</span></td>
             <td>${row.returnRate === null ? "—" : `${Math.round(row.returnRate * 100)}%`}</td>
             <td>${row.relations.length ? row.relations.join(" • ") : "—"}</td>
             <td><strong>${row.score100}</strong></td>
@@ -2812,9 +3171,14 @@ function renderAutoForgeGenerationResult(analysis, plan, numbers) {
             <div class="auto-forge-generation-grid">
                 <div><span>Struktura kuponu</span><strong>${structure}</strong></div>
                 <div><span>Parzystość</span><strong>${even}/${odd}</strong></div>
-                <div><span>HOT w kuponie</span><strong>${hotOnTicket.length}: ${hotOnTicket.join(", ") || "—"}</strong></div>
+                <div><span>Plan temperatury</span><strong>${getAutoForgeTemperatureBudgetText(baseTemperatureBudget)}</strong></div>
+                <div><span>Cel po dostępności</span><strong>${getAutoForgeTemperatureBudgetText(temperatureTargets)}</strong></div>
+                <div><span>🔥 HOT</span><strong>${hotOnTicket.length}: ${hotOnTicket.join(", ") || "—"}</strong></div>
+                <div><span>⚪ MID</span><strong>${midOnTicket.length}: ${midOnTicket.join(", ") || "—"}</strong></div>
+                <div><span>❄️ COLD+ comeback</span><strong>${promisingOnTicket.length}: ${promisingOnTicket.join(", ") || "—"}</strong></div>
+                <div><span>Zwykły COLD — tylko awaryjnie</span><strong>${regularColdOnTicket.length}: ${regularColdOnTicket.join(", ") || "—"}</strong></div>
                 <div><span>Powroty z ostatniego</span><strong>${returnsOnTicket.length}: ${returnsOnTicket.join(", ") || "—"}</strong></div>
-                <div><span>COLD odrzucone tylko ze słabych sektorów</span><strong>${plan.lastColdPoolUsed.join(", ") || "—"}</strong></div>
+                <div><span>☠️ DEAD odrzucone automatycznie</span><strong>${plan.lastDeadPoolUsed.join(", ") || "—"}</strong></div>
                 <div><span>Cel powrotów</span><strong>${plan.suggestedReturnCount} • sygnał miękki</strong></div>
             </div>
 
@@ -2845,8 +3209,8 @@ function renderAutoForgeGenerationResult(analysis, plan, numbers) {
 
             <p>
                 Najpierw obowiązuje struktura wynikająca z migracji i skupisk. Dopiero wewnątrz tych sektorów
-                AUTO FORGE waży HOT/MID/COLD, powroty, pary, trójki, czwórki i parzystość. COLD w gorącym sektorze nie jest twardo wycinane. Losowość jest ostatnim krokiem,
-                więc kupony mogą się różnić, ale pozostają wierne temu samemu profilowi danych.
+                AUTO FORGE pilnuje miksu HOT / MID / COLD+. Jeżeli nie ma wystarczająco mocnego COLD+, jego slot przechodzi przede wszystkim na MID.
+                Zwykły COLD jest tylko awaryjnym kandydatem, a DEAD bez comebacków może dostać AUTO CUT. Losowość pozostaje ostatnim krokiem.
             </p>
         </div>
     `;
@@ -2879,7 +3243,7 @@ function generateAutoForgeFromAnalysis(analysis, profileKey = "profile") {
             analysis,
             profile,
             title: `AUTO FORGE — ${profile.icon || "🎯"} ${profile.label}`,
-            subtitle: `${requested} kuponów z tym samym profilem sektorów, ale z niezależnym ważonym wyborem liczb.`
+            subtitle: `${requested} kuponów z tym samym profilem sektorów i miksem ${getAutoForgeTemperatureBudgetText(analysis.temperatureBudget)}.`
         }
     );
 
@@ -2888,7 +3252,7 @@ function generateAutoForgeFromAnalysis(analysis, profileKey = "profile") {
         result.innerHTML = `
             <div class="auto-forge-generation-result">
                 <strong>${profile.icon || "🎯"} ${profile.label}: wygenerowano ${tickets.length} różnych kuponów.</strong>
-                <p>Każdy kupon trzyma strukturę ${profile.structure.join("-")}, a liczby wewnątrz sektorów są wybierane niezależnie według scoringu AUTO FORGE.</p>
+                <p>Każdy kupon trzyma strukturę ${profile.structure.join("-")} oraz kontrolowany miks ${getAutoForgeTemperatureBudgetText(analysis.temperatureBudget)}. Gdy brakuje sensownego COLD+, jego slot przechodzi na MID.</p>
             </div>
         `;
     }
@@ -2957,6 +3321,11 @@ function renderAutoForgeReport(analysis) {
     const topPairsText = formatPatternEntries(analysis.topPairs);
     const topTriplesText = formatPatternEntries(analysis.topTriples);
     const topQuadsText = formatPatternEntries(analysis.topQuads);
+    const promisingColdText = (analysis.promisingColdCandidates || [])
+        .filter(item => item.score >= (analysis.promisingColdThreshold ?? 55))
+        .slice(0, currentGame === games.multi ? 8 : 5)
+        .map(item => `${item.number} (${item.score}/100 • ${item.sector})`)
+        .join(" • ") || "brak kandydata ≥ 55/100 — slot przejdzie na MID";
 
     report.innerHTML = `
         <div class="auto-forge-card auto-forge-diagnostic">
@@ -2995,8 +3364,12 @@ function renderAutoForgeReport(analysis) {
                 <div><span>Sugerowana struktura</span><strong>${analysis.structure.join("-")}</strong></div>
                 <div><span>Parzystość aktywnej strefy</span><strong>${analysis.suggestedEven}/${analysis.suggestedOdd} • ${Math.round(analysis.focusEvenShare * 100)}% parzystych</strong></div>
                 <div><span>Skupisko</span><strong>próg ${analysis.thresholds.cluster}+ • mocne ${analysis.thresholds.strong}+</strong></div>
+                <div><span>🎚️ Plan temperatury</span><strong>${getAutoForgeTemperatureBudgetText(analysis.temperatureBudget)}</strong><small>około 45% / 35% / 20%</small></div>
                 <div><span>HOT — TOP trendu</span><strong>${analysis.hotPool.join(", ")}</strong></div>
-                <div><span>COLD — dół trendu</span><strong>${analysis.coldPool.join(", ")} • w gorących sektorach dozwolone</strong></div>
+                <div><span>MID — osobny koszyk</span><strong>${analysis.midPool.length} kandydatów • bez premii HOT</strong></div>
+                <div><span>❄️ COLD+ — obiecujące comebacki ≥ ${analysis.promisingColdThreshold}/100</span><strong>${promisingColdText}</strong></div>
+                <div><span>COLD — dół trendu</span><strong>${analysis.coldPool.join(", ")} • tylko miękka kara</strong></div>
+                <div><span>☠️ AUTO CUT — DEAD bez comebacków</span><strong>${analysis.deadExclusionCandidates.join(", ") || "—"} • przed ochroną gorących sektorów</strong></div>
             </div>
 
             <div class="auto-forge-section">
@@ -3087,7 +3460,7 @@ function renderAutoForgeReport(analysis) {
                     }).join("")}
                 </div>
                 <small class="auto-forge-pattern-note">
-                    Najpierw AUTO FORGE dzieli budżet liczb między LOW / MID / HIGH, potem między konkretne dziesiątki. Zera w słabych sektorach są dozwolone.
+                    Najpierw AUTO FORGE dzieli budżet liczb między LOW / MID / HIGH i konkretne sektory. Dopiero potem wypełnia je kontrolowanym miksem HOT / MID / COLD+. Zera w słabych sektorach są dozwolone.
                 </small>
             </div>
 
@@ -3095,7 +3468,7 @@ function renderAutoForgeReport(analysis) {
                 <div>
                     <span>ETAP 4 — SILNIK WYBORU LICZB AKTYWNY</span>
                     <strong>Masz teraz 3 warianty struktury: profilowy, gorący i agresywny.</strong>
-                    <small>Strefa → sektor/skupisko → HOT/MID/COLD jako waga → powroty/relacje → parzystość → ważone RNG.</small>
+                    <small>Strefa → sektor/skupisko → budżet HOT/MID/COLD+ → powroty/relacje → parzystość → ważone RNG.</small>
                 </div>
                 <button id="autoForgeGenerateFromProfileBtn" class="primary-btn auto-forge-generate-profile-btn">
                     🧭 GENERUJ PROFILOWY
@@ -3457,8 +3830,8 @@ function generateMiniLotto(attempt = 0, autoForgePlan = null) {
         ? requiredSettings.pool.filter(n => !manualRequiredNumbers.includes(n))
         : [];
 
-    const autoColdPool = autoForgePlan
-        ? getSafeAutoForgeColdPool(
+    const autoDeadPool = autoForgePlan
+        ? getSafeAutoForgeDeadPool(
             autoForgePlan,
             excludeFilter ? manualExcludedNumbers : [],
             requiredSettings.enabled ? requiredSettings.pool : []
@@ -3467,11 +3840,11 @@ function generateMiniLotto(attempt = 0, autoForgePlan = null) {
 
     const effectiveExcludedNumbers = [...new Set([
         ...(excludeFilter ? manualExcludedNumbers : []),
-        ...autoColdPool
+        ...autoDeadPool
     ])];
 
-    const autoHotNumbers = autoForgePlan
-        ? drawAutoForgeHotNumbers(
+    const autoTemperatureNumbers = autoForgePlan
+        ? drawAutoForgeTemperatureNumbers(
             autoForgePlan,
             manualRequiredNumbers,
             blockedRequiredNumbers,
@@ -3481,7 +3854,7 @@ function generateMiniLotto(attempt = 0, autoForgePlan = null) {
 
     const requiredNumbers = [...new Set([
         ...manualRequiredNumbers,
-        ...autoHotNumbers
+        ...autoTemperatureNumbers
     ])];
 
     const structureFilter = document.getElementById("structureFilter").checked;
@@ -3686,9 +4059,8 @@ function generateMiniLotto(attempt = 0, autoForgePlan = null) {
     lastGeneratedTicketMeta = buildTicketMeta(numbers, euroNumbers, extraNumber);
 
     if (autoForgePlan) {
-        const hotSet = new Set(autoForgePlan.hotPool);
-        autoForgePlan.lastSelectedHotNumbers = numbers.filter(number => hotSet.has(number));
-        autoForgePlan.lastColdPoolUsed = autoColdPool;
+        autoForgePlan.lastTemperatureMix = countAutoForgeTemperatureMix(numbers, autoForgePlan);
+        autoForgePlan.lastDeadPoolUsed = autoDeadPool;
     }
 
     autoForgeSecondaryOverride = null;
@@ -4300,6 +4672,199 @@ function buildStatsSectorMigration(draws, maxDraws = 5) {
     };
 }
 
+
+function renderStatsMigrationChart(draws) {
+    const sample = (Array.isArray(draws) ? draws : [])
+        .filter(draw => getValidDrawNumbers(draw).length > 0);
+
+    if (sample.length < 2) {
+        return `
+            <div class="statsBox stats-migration-chart-box">
+                <h3>📈 WYKRES MIGRACJI</h3>
+                <div class="stats-migration-empty">
+                    Za mało danych. Potrzebne są co najmniej 2 losowania.
+                </div>
+            </div>
+        `;
+    }
+
+    const centers = sample.map(draw => {
+        const numbers = getValidDrawNumbers(draw);
+        return {
+            date: draw.data || "—",
+            value: numbers.length ? average(numbers) : 0
+        };
+    });
+
+    const split = Math.max(1, Math.floor(centers.length / 2));
+    const older = centers.slice(0, split);
+    const newer = centers.slice(split);
+    const olderAverage = average(older.map(point => point.value));
+    const newerAverage = newer.length
+        ? average(newer.map(point => point.value))
+        : olderAverage;
+    const delta = newerAverage - olderAverage;
+    const threshold = Math.max(0.6, currentGame.max * 0.01);
+    const direction = delta > threshold ? 1 : delta < -threshold ? -1 : 0;
+    const directionText = direction > 0
+        ? "↑ W GÓRĘ"
+        : direction < 0
+            ? "↓ W DÓŁ"
+            : "→ STABILNIE";
+
+    const width = 920;
+    const height = 300;
+    const left = 58;
+    const right = 26;
+    const top = 22;
+    const bottom = 48;
+    const plotWidth = width - left - right;
+    const plotHeight = height - top - bottom;
+
+    const xFor = index => centers.length === 1
+        ? left + plotWidth / 2
+        : left + (index / (centers.length - 1)) * plotWidth;
+    const yFor = value => top +
+        ((currentGame.max - clamp(value, 1, currentGame.max)) /
+        Math.max(1, currentGame.max - 1)) * plotHeight;
+
+    const polylinePoints = centers
+        .map((point, index) => `${xFor(index).toFixed(1)},${yFor(point.value).toFixed(1)}`)
+        .join(" ");
+
+    const bands = getAutoForgeBands();
+    const bandRects = bands.map(band => {
+        const yTop = yFor(band.end);
+        const yBottom = yFor(band.start);
+        const bandHeight = Math.max(1, yBottom - yTop);
+        return `
+            <rect
+                class="stats-migration-band stats-migration-band-${band.key.toLowerCase()}"
+                x="${left}"
+                y="${yTop.toFixed(1)}"
+                width="${plotWidth}"
+                height="${bandHeight.toFixed(1)}"
+                rx="5" />
+            <text
+                class="stats-migration-band-label"
+                x="${width - right - 8}"
+                y="${(yTop + 16).toFixed(1)}"
+                text-anchor="end">
+                ${band.key} ${band.start}-${band.end}
+            </text>
+        `;
+    }).join("");
+
+    const yTicks = [...new Set([
+        1,
+        ...bands.flatMap(band => [band.start, band.end]),
+        currentGame.max
+    ])]
+        .filter(value => value >= 1 && value <= currentGame.max)
+        .sort((a, b) => a - b);
+
+    const yGrid = yTicks.map(value => {
+        const y = yFor(value);
+        return `
+            <line class="stats-migration-grid" x1="${left}" y1="${y.toFixed(1)}" x2="${width - right}" y2="${y.toFixed(1)}" />
+            <text class="stats-migration-axis-label" x="${left - 10}" y="${(y + 4).toFixed(1)}" text-anchor="end">${value}</text>
+        `;
+    }).join("");
+
+    const labelTarget = 8;
+    const labelStep = Math.max(1, Math.ceil(centers.length / labelTarget));
+    const xLabels = centers.map((point, index) => {
+        const show = index === 0 || index === centers.length - 1 || index % labelStep === 0;
+        if (!show) return "";
+        const shortDate = String(point.date).replace(/\.\d{4}$/, "");
+        return `
+            <text
+                class="stats-migration-axis-label stats-migration-date-label"
+                x="${xFor(index).toFixed(1)}"
+                y="${height - 18}"
+                text-anchor="middle">${shortDate}</text>
+        `;
+    }).join("");
+
+    const pointRadius = centers.length > 120 ? 1.2 : centers.length > 50 ? 1.7 : 2.7;
+    const pointDots = centers.map((point, index) => `
+        <circle
+            class="stats-migration-point-dot"
+            cx="${xFor(index).toFixed(1)}"
+            cy="${yFor(point.value).toFixed(1)}"
+            r="${pointRadius}">
+            <title>${point.date}: środek ${point.value.toFixed(1)}</title>
+        </circle>
+    `).join("");
+
+    const olderX = left + plotWidth * 0.18;
+    const newerX = left + plotWidth * 0.82;
+    const trendLine = `
+        <line
+            class="stats-migration-trend-line"
+            x1="${olderX.toFixed(1)}"
+            y1="${yFor(olderAverage).toFixed(1)}"
+            x2="${newerX.toFixed(1)}"
+            y2="${yFor(newerAverage).toFixed(1)}"
+            marker-end="url(#migrationArrow)" />
+    `;
+
+    return `
+        <div class="statsBox stats-migration-chart-box">
+            <h3>📈 WYKRES MIGRACJI</h3>
+
+            <div class="stats-migration-chart-summary">
+                <div>
+                    <span>Starsza połowa</span>
+                    <strong>${olderAverage.toFixed(1)}</strong>
+                </div>
+                <div>
+                    <span>Nowsza połowa</span>
+                    <strong>${newerAverage.toFixed(1)}</strong>
+                </div>
+                <div>
+                    <span>Zmiana</span>
+                    <strong>${delta >= 0 ? "+" : ""}${delta.toFixed(1)}</strong>
+                </div>
+                <div>
+                    <span>Kierunek</span>
+                    <strong class="${direction > 0 ? "migration-up" : direction < 0 ? "migration-down" : "migration-flat"}">${directionText}</strong>
+                </div>
+            </div>
+
+            <div class="stats-migration-svg-wrap">
+                <svg
+                    class="stats-migration-svg"
+                    viewBox="0 0 ${width} ${height}"
+                    role="img"
+                    aria-label="Wykres migracji środka ciężkości losowań">
+                    <defs>
+                        <marker id="migrationArrow" markerWidth="8" markerHeight="8" refX="6.5" refY="3.5" orient="auto">
+                            <polygon points="0 0, 7 3.5, 0 7" class="stats-migration-arrow-head"></polygon>
+                        </marker>
+                    </defs>
+                    ${bandRects}
+                    ${yGrid}
+                    <line class="stats-migration-axis" x1="${left}" y1="${top}" x2="${left}" y2="${height - bottom}" />
+                    <line class="stats-migration-axis" x1="${left}" y1="${height - bottom}" x2="${width - right}" y2="${height - bottom}" />
+                    <polyline class="stats-migration-series" points="${polylinePoints}" />
+                    ${pointDots}
+                    ${trendLine}
+                    ${xLabels}
+                </svg>
+            </div>
+
+            <div class="stats-migration-legend">
+                <span><i class="migration-line-swatch"></i> Środek ciężkości każdego losowania</span>
+                <span><i class="migration-trend-swatch"></i> Kierunek starsza połowa → nowsza połowa</span>
+            </div>
+            <p class="stats-migration-note">
+                Im wyżej idzie linia, tym bardziej koncentracja przesuwa się w stronę wyższych liczb. Tło LOW / MID / HIGH pokazuje, przez którą część planszy przechodzi środek losowania.
+            </p>
+        </div>
+    `;
+}
+
 function renderStatsPulsePanel(pulse, continuity, migration) {
     const snapshotCards = pulse.snapshots.length
         ? pulse.snapshots.map(item => `
@@ -4427,6 +4992,343 @@ function renderStatsPulsePanel(pulse, continuity, migration) {
     `;
 }
 
+
+function getColdComebackConfig(selectedWindow = analysisWindow) {
+    const drawCount = getHistoricalDrawCount();
+    const hitProbability = currentGame.max > 0 ? drawCount / currentGame.max : 0.1;
+
+    // Próg „martwej” liczby jest zależny od gry: im rzadziej pojedyncza liczba
+    // wpada w losowaniu, tym dłuższa przerwa jest potrzebna, żeby uznać ją za DEAD.
+    const deadDrought = Math.max(
+        6,
+        Math.ceil(Math.log(0.10) / Math.log(Math.max(0.01, 1 - hitProbability)))
+    );
+
+    const minLookback = currentGame === games.multi ? 10 : 15;
+    const maxLookback = currentGame === games.multi ? 30 : 40;
+    const lookback = clamp(Number(selectedWindow) || 20, minLookback, maxLookback);
+
+    return {
+        lookback,
+        deadDrought,
+        deepColdDrought: Math.max(4, Math.ceil(deadDrought * 0.65)),
+        hitProbability
+    };
+}
+
+function getNumberDroughtBeforeIndex(draws, number, endExclusive) {
+    let drought = 0;
+    for (let i = endExclusive - 1; i >= 0; i--) {
+        const nums = getValidDrawNumbers(draws[i]);
+        if (nums.includes(number)) return drought;
+        drought++;
+    }
+    return drought;
+}
+
+function buildColdStateSnapshot(draws, endExclusive, config) {
+    const start = Math.max(0, endExclusive - config.lookback);
+    const sample = draws.slice(start, endExclusive);
+    const hits = new Array(currentGame.max + 1).fill(0);
+
+    sample.forEach(draw => {
+        getValidDrawNumbers(draw).forEach(number => {
+            hits[number]++;
+        });
+    });
+
+    const values = hits.slice(1).sort((a, b) => a - b);
+    const q25Index = values.length ? Math.floor((values.length - 1) * 0.25) : 0;
+    const coldHitThreshold = values.length ? values[q25Index] : 0;
+    const states = new Array(currentGame.max + 1).fill(null);
+
+    for (let number = 1; number <= currentGame.max; number++) {
+        const drought = getNumberDroughtBeforeIndex(draws, number, endExclusive);
+        const isCold = hits[number] <= coldHitThreshold;
+        const isDead = drought >= config.deadDrought;
+        const isDeepCold = isCold && !isDead && drought >= config.deepColdDrought;
+
+        states[number] = {
+            number,
+            hits: hits[number],
+            drought,
+            isCold,
+            isDeepCold,
+            isDead,
+            status: isDead ? "DEAD" : isDeepCold ? "DEEP COLD" : isCold ? "COLD" : "ACTIVE"
+        };
+    }
+
+    return {
+        sampleSize: sample.length,
+        coldHitThreshold,
+        states
+    };
+}
+
+function buildStatsColdComebackAnalysis(draws, selectedWindow = analysisWindow) {
+    const ordered = sortDrawsChronologically(draws || []);
+    const config = getColdComebackConfig(selectedWindow);
+    const coldOpportunities = new Array(currentGame.max + 1).fill(0);
+    const coldComebacks = new Array(currentGame.max + 1).fill(0);
+    const deadOpportunities = new Array(currentGame.max + 1).fill(0);
+    const deadComebacks = new Array(currentGame.max + 1).fill(0);
+    const events = [];
+
+    if (ordered.length < 2) {
+        return {
+            config,
+            latestComebacks: [],
+            currentRanking: [],
+            exclusionCandidates: [],
+            events: [],
+            analyzedTransitions: 0,
+            totalColdComebacks: 0,
+            totalDeadComebacks: 0
+        };
+    }
+
+    const transitionCount = Math.min(Math.max(2, Number(selectedWindow) || 20), ordered.length - 1);
+    const firstTargetIndex = Math.max(1, ordered.length - transitionCount);
+
+    for (let i = 1; i < ordered.length; i++) {
+        // Nie klasyfikujemy po 1–2 losowaniach, bo wtedy COLD byłby przypadkowy.
+        if (i < Math.min(5, config.lookback)) continue;
+
+        const snapshot = buildColdStateSnapshot(ordered, i, config);
+        const currentSet = new Set(getValidDrawNumbers(ordered[i]));
+        const includeEvent = i >= firstTargetIndex;
+
+        for (let number = 1; number <= currentGame.max; number++) {
+            const state = snapshot.states[number];
+            if (!state) continue;
+
+            if (state.isCold) {
+                coldOpportunities[number]++;
+                if (currentSet.has(number)) {
+                    coldComebacks[number]++;
+                    if (includeEvent) {
+                        events.push({
+                            number,
+                            date: ordered[i].data || "—",
+                            drawNumber: ordered[i].numer || "—",
+                            priorStatus: state.status,
+                            priorDrought: state.drought,
+                            priorHits: state.hits,
+                            lookback: snapshot.sampleSize
+                        });
+                    }
+                }
+            }
+
+            if (state.isDead) {
+                deadOpportunities[number]++;
+                if (currentSet.has(number)) deadComebacks[number]++;
+            }
+        }
+    }
+
+    const latestIndex = ordered.length - 1;
+    const latestSnapshot = latestIndex >= 1
+        ? buildColdStateSnapshot(ordered, latestIndex, config)
+        : null;
+    const latestNumbers = new Set(getValidDrawNumbers(ordered[latestIndex]));
+    const latestComebacks = latestSnapshot
+        ? [...latestNumbers]
+            .map(number => latestSnapshot.states[number])
+            .filter(state => state?.isCold)
+            .map(state => ({
+                number: state.number,
+                priorStatus: state.status,
+                priorDrought: state.drought,
+                priorHits: state.hits,
+                coldRate: coldOpportunities[state.number]
+                    ? coldComebacks[state.number] / coldOpportunities[state.number]
+                    : 0,
+                deadRate: deadOpportunities[state.number]
+                    ? deadComebacks[state.number] / deadOpportunities[state.number]
+                    : 0
+            }))
+            .sort((a, b) => b.priorDrought - a.priorDrought || a.number - b.number)
+        : [];
+
+    // Stan „na teraz” liczymy po ostatnim zaimportowanym losowaniu.
+    const currentSnapshot = buildColdStateSnapshot(ordered, ordered.length, config);
+    const expectedHits = Math.max(0.25, config.hitProbability * currentSnapshot.sampleSize);
+
+    const currentRanking = [];
+    for (let number = 1; number <= currentGame.max; number++) {
+        const state = currentSnapshot.states[number];
+        if (!state || !state.isCold) continue;
+
+        const coldRate = coldOpportunities[number]
+            ? coldComebacks[number] / coldOpportunities[number]
+            : 0;
+        const deadRate = deadOpportunities[number]
+            ? deadComebacks[number] / deadOpportunities[number]
+            : 0;
+
+        const droughtFactor = clamp(state.drought / Math.max(1, config.deadDrought * 1.5), 0, 1);
+        const comebackRelative = config.hitProbability > 0
+            ? clamp(coldRate / config.hitProbability, 0, 1)
+            : 0;
+        const frequencyFactor = 1 - clamp(state.hits / expectedHits, 0, 1);
+        const deadBoost = state.isDead ? 0.15 : state.isDeepCold ? 0.07 : 0;
+        const exclusionScore = Math.round(clamp(
+            (droughtFactor * 0.50 + (1 - comebackRelative) * 0.30 + frequencyFactor * 0.20 + deadBoost) * 100,
+            0,
+            100
+        ));
+
+        currentRanking.push({
+            number,
+            status: state.status,
+            hits: state.hits,
+            drought: state.drought,
+            coldComebacks: coldComebacks[number],
+            coldOpportunities: coldOpportunities[number],
+            coldRate,
+            deadComebacks: deadComebacks[number],
+            deadOpportunities: deadOpportunities[number],
+            deadRate,
+            exclusionScore,
+            recommendation:
+                exclusionScore >= 78 ? "MOCNY KANDYDAT" :
+                exclusionScore >= 62 ? "DO ROZWAŻENIA" :
+                "NIE WYCINAJ W CIEMNO"
+        });
+    }
+
+    currentRanking.sort((a, b) =>
+        b.exclusionScore - a.exclusionScore ||
+        b.drought - a.drought ||
+        a.number - b.number
+    );
+
+    return {
+        config,
+        latestComebacks,
+        currentRanking,
+        exclusionCandidates: currentRanking.filter(item => item.exclusionScore >= 62).slice(0, 12),
+        events: events.sort((a, b) => b.priorDrought - a.priorDrought).slice(0, 30),
+        analyzedTransitions: transitionCount,
+        totalColdComebacks: events.length,
+        totalDeadComebacks: events.filter(item => item.priorStatus === "DEAD").length
+    };
+}
+
+function renderStatsColdComebackPanel(stats) {
+    if (!stats) return "";
+
+    const latestRows = stats.latestComebacks.length
+        ? stats.latestComebacks.map(item => `
+            <div class="cold-comeback-chip ${item.priorStatus === "DEAD" ? "dead" : ""}">
+                <strong>${item.number}</strong>
+                <span>${item.priorStatus}</span>
+                <small>przerwa ${item.priorDrought} • ${item.priorHits} traf. w oknie</small>
+            </div>
+        `).join("")
+        : `<div class="cold-comeback-empty">W ostatnim losowaniu nie wróciła liczba sklasyfikowana wcześniej jako COLD / DEAD.</div>`;
+
+    const rankingRows = stats.currentRanking.length
+        ? stats.currentRanking.slice(0, 18).map(item => `
+            <tr class="${item.status === "DEAD" ? "cold-row-dead" : item.status === "DEEP COLD" ? "cold-row-deep" : ""}">
+                <td><strong>${item.number}</strong></td>
+                <td><span class="cold-state cold-state-${item.status.toLowerCase().replace(/\s+/g, "-")}">${item.status}</span></td>
+                <td>${item.drought}</td>
+                <td>${item.hits}</td>
+                <td>${item.coldComebacks}/${item.coldOpportunities}</td>
+                <td>${item.coldOpportunities ? Math.round(item.coldRate * 100) : 0}%</td>
+                <td><strong>${item.exclusionScore}/100</strong></td>
+                <td>${item.recommendation}</td>
+            </tr>
+        `).join("")
+        : `<tr><td colspan="8">Brak liczb COLD dla aktualnego okna.</td></tr>`;
+
+    const exclusionText = stats.exclusionCandidates.length
+        ? stats.exclusionCandidates.map(item => item.number).join(", ")
+        : "—";
+
+    return `
+        <section class="stats-cold-comeback-panel" data-stats-tab-section="cold-returns">
+            <div class="cold-comeback-head">
+                <div>
+                    <span>❄️ COLD COMEBACK</span>
+                    <strong>Czy zimne i „martwe” liczby faktycznie wracają?</strong>
+                </div>
+                <div class="cold-comeback-meta">
+                    <span>Okno statusu <strong>${stats.config.lookback}</strong></span>
+                    <span>DEAD od <strong>${stats.config.deadDrought}</strong> los. przerwy</span>
+                </div>
+            </div>
+
+            <div class="cold-comeback-summary-grid">
+                <div>
+                    <span>Powroty COLD w badanym okresie</span>
+                    <strong>${stats.totalColdComebacks}</strong>
+                </div>
+                <div>
+                    <span>Z tego powroty DEAD</span>
+                    <strong>${stats.totalDeadComebacks}</strong>
+                </div>
+                <div>
+                    <span>Kandydaci do wykluczenia</span>
+                    <strong>${stats.exclusionCandidates.length}</strong>
+                </div>
+                <div>
+                    <span>Badane przejścia</span>
+                    <strong>${stats.analyzedTransitions}</strong>
+                </div>
+            </div>
+
+            <div class="cold-comeback-section">
+                <h4>⚡ Co wróciło w OSTATNIM losowaniu mimo wcześniejszego COLD?</h4>
+                <div class="cold-comeback-latest">${latestRows}</div>
+            </div>
+
+            <div class="cold-comeback-section">
+                <div class="cold-comeback-candidate-box">
+                    <div>
+                        <span>🧊 Najmocniejsi kandydaci do ręcznego wykluczenia</span>
+                        <strong>${exclusionText}</strong>
+                    </div>
+                    <small>
+                        Ranking łączy długość obecnej przerwy, małą częstość w ostatnim oknie i historycznie niski współczynnik comebacków.
+                        AUTO FORGE ma ostrzejszą zasadę: twardo wycina tylko DEAD z mocnym wynikiem, co najmniej 3 historycznymi sytuacjami DEAD
+                        i bardzo niskim powrotem ze stanu DEAD. Gorące sektory nadal mają ochronę przed automatycznym wycięciem.
+                    </small>
+                </div>
+            </div>
+
+            <div class="cold-comeback-section">
+                <h4>📋 Aktualne COLD rozbite na jakość</h4>
+                <div class="stats-table-scroll">
+                    <table class="statsTable cold-comeback-table">
+                        <thead>
+                            <tr>
+                                <th>Liczba</th>
+                                <th>Status</th>
+                                <th>Przerwa</th>
+                                <th>Traf. w oknie</th>
+                                <th>Comebacki</th>
+                                <th>Comeback %</th>
+                                <th>Wykluczenie</th>
+                                <th>Ocena</th>
+                            </tr>
+                        </thead>
+                        <tbody>${rankingRows}</tbody>
+                    </table>
+                </div>
+            </div>
+
+            <p class="cold-comeback-note">
+                COLD = dolny kwartyl częstotliwości w bieżącym oknie. DEEP COLD = COLD z dłuższą przerwą.
+                DEAD = przerwa wyjątkowo długa dla danej gry. Comeback liczy sytuację, w której liczba była COLD przed losowaniem i pojawiła się w kolejnym.
+            </p>
+        </section>
+    `;
+}
+
 function initializeStatsDashboard() {
     const tabs = document.getElementById("statsTabs");
     const summary = document.getElementById("statsSummaryGrid");
@@ -4475,6 +5377,10 @@ function initializeStatsDashboard() {
 }
 
 function pokazStatystyki() {
+
+    // Widok statystyk korzysta z własnego układu kolumnowego.
+    // Bez tego #contentArea (flex w generatorze) rozciągał panele na całą wysokość ekranu.
+    contentArea.classList.add("stats-view");
 
     const statystyki = {};
 
@@ -4795,6 +5701,7 @@ const returnStats = buildStatsReturnAnalysis(
 const shortPulse = buildStatsShortPulse(getCurrentGameDraws());
 const clusterContinuity = buildStatsClusterContinuity(getCurrentGameDraws(), 5);
 const sectorMigration = buildStatsSectorMigration(getCurrentGameDraws(), 5);
+const coldComebackStats = buildStatsColdComebackAnalysis(getCurrentGameDraws(), analysisWindow);
     let html = `
 <h2>📊 Statystyki ${currentGame.title}</h2>
 <div class="stats-command-bar">
@@ -4809,6 +5716,7 @@ const sectorMigration = buildStatsSectorMigration(getCurrentGameDraws(), 5);
         <button type="button" data-tab="numbers">🔥 Liczby</button>
         <button type="button" data-tab="patterns">🧩 Wzorce</button>
         <button type="button" data-tab="returns">🔁 Powroty</button>
+        <button type="button" data-tab="cold-returns">❄️ COLD comeback</button>
     </div>
 </div>
 <div class="stats-window-controls">
@@ -4962,6 +5870,7 @@ ${renderStatsPulsePanel(shortPulse, clusterContinuity, sectorMigration)}
     </strong>
 </div>
 </div>
+${renderStatsMigrationChart(analizowaneLosowania)}
 <div class="statsBox">
     <h3>📏 ROZRZUT</h3>
 
@@ -5128,6 +6037,8 @@ ${renderStatsPatternBox("TOP CZWÓRKI", "◼️", quadStats)}
 </section>
 
 </div>
+
+${renderStatsColdComebackPanel(coldComebackStats)}
 
 <div class="stats-number-ranking-panel" data-stats-tab-section="numbers">
 <h3>🔢 PEŁNY RANKING LICZB</h3>
