@@ -2985,3 +2985,82 @@ button,.primary-btn{border:0;border-radius:11px!important;padding:11px 16px!impo
         justify-content:space-between!important;
     }
 }
+
+
+/* =========================================================
+   LOTTOFORGE LABORATORIUM — MINI LOTTO / DAILY TESTS
+   ========================================================= */
+#contentArea.lab-view{display:block!important;width:100%;min-width:0}.lab-shell{width:min(1280px,100%);margin:0 auto;padding-bottom:80px}.lab-hero{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(290px,.65fr);gap:18px;align-items:stretch;margin-bottom:18px}.lab-hero>div:first-child{padding:20px 4px}.lab-kicker,.lab-section-head>div>span{display:block;color:#9f8cff;font-size:11px;font-weight:900;letter-spacing:.11em;text-transform:uppercase;margin-bottom:6px}.lab-hero h1{margin:0 0 9px}.lab-hero p{max-width:840px;line-height:1.65;margin:0;color:#9ba9bd}.lab-hero p strong{color:#e8eeff}.lab-latest-draw{border-radius:17px;padding:18px;background:linear-gradient(145deg,rgba(17,24,38,.98),rgba(10,15,24,.98));border:1px solid rgba(100,120,150,.22);display:flex;flex-direction:column;justify-content:center;gap:7px;box-shadow:0 14px 34px rgba(0,0,0,.22)}.lab-latest-draw.ready{border-color:rgba(64,216,138,.32)}.lab-latest-draw.warning{border-color:rgba(247,198,92,.32)}.lab-latest-draw span{font-size:10px;font-weight:900;letter-spacing:.1em;color:#7e8da4}.lab-latest-draw strong{font-size:20px;color:#f3f7ff}.lab-latest-draw.ready strong{color:#7ce6aa}.lab-latest-draw.warning strong{color:#f8d47b}.lab-latest-draw small{color:#8190a6;line-height:1.45}.lab-summary-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:11px;margin-bottom:18px}.lab-summary-grid>div{padding:15px 16px;border-radius:14px;background:linear-gradient(180deg,rgba(18,25,39,.96),rgba(10,15,24,.97));border:1px solid rgba(95,112,140,.18);box-shadow:0 10px 26px rgba(0,0,0,.16)}.lab-summary-grid span{display:block;color:#7f8da3;text-transform:uppercase;font-size:10px;font-weight:850;letter-spacing:.07em;margin-bottom:6px}.lab-summary-grid strong{font-size:22px;color:#f1f5ff}.lab-create-panel,.lab-section{margin-top:16px;padding:20px;border-radius:18px;background:radial-gradient(circle at 100% 0%,rgba(124,92,255,.08),transparent 35%),linear-gradient(145deg,rgba(21,28,43,.96),rgba(11,16,26,.98));border:1px solid rgba(124,92,255,.24);box-shadow:0 16px 38px rgba(0,0,0,.20)}.lab-section.history{border-color:rgba(62,166,255,.18)}.lab-section-head{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:16px}.lab-section-head h2{margin:0;font-size:20px}.lab-flow{padding:7px 10px;border-radius:999px;background:rgba(124,92,255,.09);border:1px solid rgba(124,92,255,.24);color:#bdb3ff;font-size:10px;font-weight:900;letter-spacing:.05em}.lab-counter{display:inline-flex;min-width:38px;height:38px;align-items:center;justify-content:center;border-radius:12px;background:#111827;border:1px solid #293754;color:#eef3ff}.lab-create-grid{display:grid;grid-template-columns:minmax(180px,.35fr) minmax(260px,1fr);gap:12px}.lab-field{margin-top:12px}.lab-field label{display:block;margin-bottom:7px;font-size:12px;font-weight:800;color:#acb8cb}.lab-field label small{font-weight:600;color:#738199}.lab-field textarea{resize:vertical;min-height:148px;line-height:1.6;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:14px}.lab-field>small{display:block;margin-top:7px;color:#748299;line-height:1.5;font-size:11px}.lab-actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:16px;align-items:center}.lab-actions .primary-btn{margin-top:0!important}.lab-secondary-btn{background:#151e2e!important;color:#d9e3f3!important;border:1px solid #2d3b54!important;box-shadow:none!important}.lab-ticket-list{display:grid;gap:12px}.lab-ticket-card{position:relative;padding:16px;border-radius:15px;background:linear-gradient(180deg,rgba(15,22,34,.98),rgba(9,14,23,.98));border:1px solid rgba(94,111,138,.18);overflow:hidden}.lab-ticket-card.pending{border-left:3px solid #7c5cff}.lab-ticket-card.checked.good,.lab-ticket-card.checked.great,.lab-ticket-card.checked.jackpot{border-color:rgba(64,216,138,.30)}.lab-ticket-card.checked.medium{border-color:rgba(247,198,92,.24)}.lab-ticket-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}.lab-ticket-head>div:first-child{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.lab-ticket-head strong{font-size:15px;color:#eef3ff}.lab-ticket-head small{width:100%;color:#8190a6;margin-top:2px}.lab-status{display:inline-flex;align-items:center;padding:5px 8px;border-radius:999px;font-size:9px;font-weight:900;letter-spacing:.08em}.lab-status.waiting{background:rgba(124,92,255,.12);border:1px solid rgba(124,92,255,.30);color:#c7beff}.lab-status.checked{background:rgba(64,216,138,.10);border:1px solid rgba(64,216,138,.26);color:#7ce6aa}.lab-icon-btn{width:32px;height:32px;padding:0!important;border-radius:9px!important;display:inline-flex;align-items:center;justify-content:center;background:#151d2b!important;color:#8e9bb0!important;border:1px solid #28364e!important}.lab-text-btn{background:none!important;padding:4px 0!important;box-shadow:none!important;color:#9aa7ba!important;font-size:11px}.lab-icon-btn.danger:hover,.lab-text-btn.danger:hover{color:#ff8f99!important}.lab-ticket-numbers{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}.lab-number{display:inline-flex;width:39px;height:39px;align-items:center;justify-content:center;border-radius:50%;background:radial-gradient(circle at 32% 24%,#cbd7f4,#65799f 32%,#2c3955 68%,#171f31);border:1px solid rgba(255,255,255,.14);font-weight:900;font-size:12px;color:#f7f9ff;box-shadow:inset -5px -7px 12px rgba(0,0,0,.27),0 5px 12px rgba(0,0,0,.20)}.lab-number.hit{background:radial-gradient(circle at 32% 24%,#d8ffe9,#58d891 32%,#207451 68%,#0d3425);border-color:rgba(124,230,170,.65);box-shadow:0 0 0 3px rgba(64,216,138,.09),0 7px 16px rgba(0,0,0,.24)}.lab-ticket-foot{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;padding-top:11px;border-top:1px solid rgba(92,108,137,.12);color:#738199;font-size:10px}.lab-ticket-foot strong{color:#aab7ca}.lab-hit-badge{min-width:88px;padding:8px 11px;border-radius:12px;text-align:right;background:#111827;border:1px solid #293754}.lab-hit-badge span{display:block;color:#78869c;font-size:8px;font-weight:900;letter-spacing:.08em}.lab-hit-badge strong{font-size:19px}.lab-hit-badge.good strong,.lab-hit-badge.great strong,.lab-hit-badge.jackpot strong{color:#7ce6aa}.lab-hit-badge.medium strong{color:#f8d47b}.lab-hit-badge.quiet strong{color:#93a0b4}.lab-result-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:12px 0}.lab-result-grid>div{padding:10px;border-radius:11px;background:#0d141f;border:1px solid rgba(91,108,136,.14)}.lab-result-grid span{display:block;color:#748299;font-size:9px;text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px}.lab-result-grid strong{font-size:11px;color:#dbe4f4;word-break:break-word}.lab-system-breakdown{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:10px 0 12px}.lab-system-breakdown>div{display:flex;align-items:center;justify-content:space-between;padding:9px 11px;border-radius:10px;background:#0c121c;border:1px solid rgba(91,108,136,.12)}.lab-system-breakdown span{color:#77859a;font-size:10px;font-weight:800}.lab-system-breakdown strong{color:#8c99ac}.lab-system-breakdown>div.active{background:rgba(64,216,138,.07);border-color:rgba(64,216,138,.24)}.lab-system-breakdown>div.active strong{color:#7ce6aa;font-size:15px}.lab-empty{padding:28px;text-align:center;border-radius:13px;border:1px dashed rgba(110,126,153,.22);color:#738199;background:rgba(8,13,21,.45);font-size:12px}
+@media(max-width:1050px){.lab-hero{grid-template-columns:1fr}.lab-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.lab-result-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:760px){#contentArea.lab-view{padding:0!important}.lab-shell{width:100%}.lab-summary-grid{grid-template-columns:1fr 1fr}.lab-create-grid{grid-template-columns:1fr}.lab-actions{flex-direction:column;align-items:stretch}.lab-actions button{width:100%}.lab-result-grid{grid-template-columns:1fr}.lab-system-breakdown{grid-template-columns:1fr}.lab-ticket-head{align-items:flex-start}.lab-ticket-foot{flex-direction:column}.lab-hero>div:first-child{padding-top:4px}}
+@media(max-width:460px){.lab-summary-grid{grid-template-columns:1fr}.lab-create-panel,.lab-section{padding:15px}.lab-ticket-numbers{gap:6px}.lab-number{width:36px;height:36px}.lab-latest-draw strong{font-size:17px}}
+
+/* =========================================================
+   LOTTOFORGE — QUICK COPY / LABORATORIUM 2.0
+   ========================================================= */
+.ticket-quick-copy-panel{
+    width:100%;
+    margin-top:16px;
+    padding:17px;
+    border-radius:16px;
+    background:radial-gradient(circle at 100% 0%,rgba(64,216,138,.08),transparent 36%),linear-gradient(145deg,rgba(18,26,40,.98),rgba(10,16,25,.99));
+    border:1px solid rgba(64,216,138,.25);
+    box-shadow:0 14px 34px rgba(0,0,0,.20);
+}
+.ticket-quick-copy-head{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:14px;
+    margin-bottom:11px;
+}
+.ticket-quick-copy-head>div{display:flex;flex-direction:column;gap:4px;}
+.ticket-quick-copy-head span{color:#7ce6aa;font-size:10px;font-weight:900;letter-spacing:.09em;}
+.ticket-quick-copy-head strong{color:#f2f7ff;font-size:15px;}
+.ticket-quick-copy-head small{padding:5px 8px;border-radius:999px;background:rgba(64,216,138,.08);border:1px solid rgba(64,216,138,.20);color:#8bdcb0;font-size:10px;font-weight:850;white-space:nowrap;}
+.ticket-quick-copy-panel textarea{
+    width:100%;
+    min-height:96px;
+    resize:vertical;
+    background:#080e16!important;
+    border:1px solid #293950!important;
+    color:#dce9ff!important;
+    font:750 13px/1.7 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    letter-spacing:.025em;
+}
+.ticket-quick-copy-actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:10px;}
+.ticket-quick-copy-actions button{margin-top:0!important;}
+.ticket-quick-copy-hint{display:block;margin-top:9px;color:#73839a;font-size:10px;line-height:1.45;}
+
+.lab-game-switcher{
+    width:min(360px,100%);
+    margin-top:16px;
+    padding:12px 14px;
+    border-radius:13px;
+    background:rgba(124,92,255,.06);
+    border:1px solid rgba(124,92,255,.18);
+}
+.lab-game-switcher label{display:block;margin:0 0 7px;color:#909db2;font-size:10px;font-weight:900;letter-spacing:.08em;text-transform:uppercase;}
+.lab-game-switcher select{margin:0!important;}
+.lab-secondary-numbers{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    flex-wrap:wrap;
+    margin:-2px 0 12px;
+    padding:10px 12px;
+    border-radius:11px;
+    background:rgba(247,198,92,.045);
+    border:1px solid rgba(247,198,92,.13);
+}
+.lab-secondary-numbers>span{color:#d9b85c;font-size:9px;font-weight:900;letter-spacing:.08em;text-transform:uppercase;}
+.lab-secondary-numbers>div{display:flex;gap:6px;flex-wrap:wrap;}
+.lab-secondary-numbers .lab-number{width:32px;height:32px;font-size:10px;}
+.lab-secondary-hit{display:block!important;margin-top:3px;color:#94a1b4!important;font-size:8px!important;font-weight:800;}
+.lab-secondary-hit strong{font-size:10px!important;color:#dfe8f8!important;}
+
+@media(max-width:760px){
+    .ticket-quick-copy-head{flex-direction:column;}
+    .ticket-quick-copy-actions{flex-direction:column;}
+    .ticket-quick-copy-actions button{width:100%;}
+}

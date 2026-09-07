@@ -83,6 +83,12 @@ let autoForgeSecondaryOverride = null;
 let autoForgeManualStructureOverride = null;
 let lastGeneratedTicketMeta = null;
 
+// Aktywny wyłącznie podczas generowania pakietu wielu kuponów.
+// Pozwala samemu RNG unikać liczb już mocno użytych w bieżącym pakiecie.
+let activeBatchDiversityUsage = null;
+let activeBatchDiversityIgnored = new Set();
+let activeBatchDiversityMaxUsage = null;
+
 // AUTO FORGE — profile okien analizy zależne od gry.
 // Pierwsze okno ma zwykle największą wagę, dzięki czemu długi profil
 // zachowuje kontakt z bieżącą sytuacją, ale dostaje stabilniejsze tło.
@@ -320,6 +326,7 @@ const euroBtn = document.getElementById("euroBtn");
 const extraBtn = document.getElementById("extraBtn");
 const importBtn = document.getElementById("importBtn");
 const statsBtn = document.getElementById("statsBtn");
+const labBtn = document.getElementById("labBtn");
 const csvFile = document.getElementById("csvFile");
 euroBtn.addEventListener("click", () => {
 
@@ -358,6 +365,10 @@ statsBtn.addEventListener("click", () => {
 
     pokazStatystyki();
 
+});
+
+labBtn.addEventListener("click", () => {
+    showLaboratory(getCurrentGameKey());
 });
 function detectCsvDelimiter(line) {
     const candidates = [";", "\t", ","];
@@ -477,6 +488,7 @@ csvFile.addEventListener("change", (e) => {
 
             const latestDraw = getLatestImportedDraw();
             renderLatestDrawStatus();
+            const labResolvedCount = resolveLaboratoryEntries();
 
             alert(
                 `✅ Zaimportowano ${gameDraws.length} losowań dla ${currentGame.title}!` +
@@ -484,6 +496,9 @@ csvFile.addEventListener("change", (e) => {
                 (latestDraw
                     ? `\n\n📅 Ostatnie losowanie: ${latestDraw.data}` +
                       `\n🔢 ${formatLatestDrawNumbers(latestDraw)}`
+                    : "") +
+                (labResolvedCount > 0
+                    ? `\n\n🧪 Laboratorium automatycznie rozliczyło: ${labResolvedCount} ${labResolvedCount === 1 ? "zestaw" : "zestawów"}.`
                     : "")
             );
         } catch (error) {
@@ -503,7 +518,7 @@ const contentArea = document.getElementById("contentArea");
 
 
 function showGame(){
-contentArea.classList.remove("stats-view");
+contentArea.classList.remove("stats-view", "lab-view");
 const labels = currentGame.ranges.map((value, index) => {
 
     const start = index === 0
@@ -988,7 +1003,9 @@ function updateTicketBatchInfo() {
 
     info.innerHTML = `
         <strong>${count} ${count === 1 ? "kupon" : "kuponów"}</strong> po ${target} liczb${systemText}.
-        <span>Generator próbuje tworzyć różne zestawy przy tych samych aktywnych filtrach.</span>
+        <span>${count > 1
+            ? "Tryb pakietu twardo blokuje nadmierne powtórzenia zwykłych liczb, gdy tylko filtry zostawiają alternatywę."
+            : "Generator tworzy zestaw przy aktualnie aktywnych filtrach."}</span>
     `;
 }
 
@@ -1018,6 +1035,255 @@ function getTicketUniquenessKey(ticket) {
     ].join("|");
 }
 
+
+// =========================================================
+// PAKIETY KUPONÓW — KONTROLA RÓŻNORODNOŚCI
+// =========================================================
+// Przy generowaniu kilku kuponów nie wystarczy odrzucić identycznych zestawów.
+// Pilnujemy też, żeby kolejne kupony nie były kosmetycznymi wariacjami pierwszego.
+// Wszystkie aktywne filtry nadal obowiązują; różnorodność jest dodatkowym etapem
+// wyboru pomiędzy kandydatami, którzy już przeszli przez generator.
+function getBatchForcedMainNumbers() {
+    if (typeof getRequiredSettings !== "function") return new Set();
+
+    const settings = getRequiredSettings();
+    if (!settings?.enabled || settings.count <= 0) return new Set();
+
+    const excludeFilter = document.getElementById("excludeFilter")?.checked ?? false;
+    const excluded = new Set(
+        excludeFilter
+            ? String(document.getElementById("excludedNumbers")?.value || "")
+                .split(",")
+                .map(value => Number(value.trim()))
+                .filter(Number.isInteger)
+            : []
+    );
+
+    const availablePool = settings.pool.filter(number => !excluded.has(number));
+
+    // Jeśli użytkownik każe pobrać całą dostępną pulę, te liczby z definicji
+    // muszą znaleźć się na każdym kuponie. Nie karzemy generatora za ich powtórzenia.
+    return settings.count === availablePool.length
+        ? new Set(availablePool)
+        : new Set();
+}
+
+function getBatchDiversityLimits(requested, targetCount, ignoredCount = 0) {
+    const effectiveTarget = Math.max(1, targetCount - ignoredCount);
+    const effectiveUniverse = Math.max(1, currentGame.max - ignoredCount);
+
+    // Dla kuponów 5–6 liczb oznacza to zwykle maksymalnie 2 wspólne liczby
+    // pomiędzy dowolnymi dwoma kuponami. Dla większych systemów limit rośnie.
+    const maxPairOverlap = effectiveTarget <= 2
+        ? 0
+        : effectiveTarget <= 6
+            ? 1
+            : Math.max(1, Math.floor(effectiveTarget * 0.30));
+
+    // Globalny limit użycia jednej liczby zależy od wielkości pakietu i planszy.
+    // 5 × system 6 w Mini Lotto => jedna liczba powinna zwykle wystąpić max 2 razy.
+    const averageUsage = (requested * effectiveTarget) / effectiveUniverse;
+    const maxNumberUsage = Math.min(
+        requested,
+        Math.max(1, Math.ceil(averageUsage + 0.75))
+    );
+
+    return { maxPairOverlap, maxNumberUsage };
+}
+
+function getBatchMainUsage(tickets, ignoredNumbers = new Set()) {
+    const usage = new Map();
+
+    tickets.forEach(ticket => {
+        (ticket.numbers || []).forEach(number => {
+            if (ignoredNumbers.has(number)) return;
+            usage.set(number, (usage.get(number) || 0) + 1);
+        });
+    });
+
+    return usage;
+}
+
+function getActiveBatchDiversityMultiplier(number) {
+    if (!activeBatchDiversityUsage || activeBatchDiversityIgnored.has(number)) {
+        return 1;
+    }
+
+    const usage = activeBatchDiversityUsage.get(number) || 0;
+
+    // W pakiecie zwykła liczba po dojściu do limitu dostaje wagę 0.
+    // To jest kluczowa różnica względem starego miękkiego karania: jeśli w danym
+    // sektorze są inne poprawne liczby, generator NIE może dalej wciskać np. 36
+    // do każdego kolejnego kuponu tylko dlatego, że ma wysoki score AUTO FORGE.
+    if (Number.isFinite(activeBatchDiversityMaxUsage) && usage >= activeBatchDiversityMaxUsage) {
+        return 0;
+    }
+
+    // Pierwsza powtórka jest nadal dozwolona, ale bardzo mocno zniechęcana.
+    // Dzięki temu pięć kuponów wygląda jak pięć osobnych losowań, a nie wariacje
+    // jednego kuponu bazowego.
+    return usage === 0 ? 1 : Math.pow(0.035, usage);
+}
+
+function getBatchAwareRandomIndex(pool) {
+    if (!pool.length) return -1;
+    if (!activeBatchDiversityUsage) return Math.floor(Math.random() * pool.length);
+
+    const weights = pool.map(number => getActiveBatchDiversityMultiplier(number));
+    const total = weights.reduce((sum, value) => sum + value, 0);
+
+    if (total > 0) {
+        let roll = Math.random() * total;
+        for (let i = 0; i < weights.length; i++) {
+            roll -= weights[i];
+            if (roll <= 0) return i;
+        }
+        return pool.length - 1;
+    }
+
+    // Jeżeli cały lokalny pool (np. bardzo ciasny sektor + filtry) osiągnął limit,
+    // nie wybieramy przypadkowo ulubionej liczby. Bierzemy spośród najmniej użytych.
+    // Kandydat i tak przejdzie później końcową kontrolę pakietu.
+    let minUsage = Infinity;
+    const leastUsedIndexes = [];
+    pool.forEach((number, index) => {
+        const usage = activeBatchDiversityIgnored.has(number)
+            ? 0
+            : (activeBatchDiversityUsage.get(number) || 0);
+        if (usage < minUsage) {
+            minUsage = usage;
+            leastUsedIndexes.length = 0;
+            leastUsedIndexes.push(index);
+        } else if (usage === minUsage) {
+            leastUsedIndexes.push(index);
+        }
+    });
+
+    return leastUsedIndexes[Math.floor(Math.random() * leastUsedIndexes.length)] ?? 0;
+}
+
+function getTicketMainOverlap(ticketA, ticketB, ignoredNumbers = new Set()) {
+    const second = new Set(
+        (ticketB?.numbers || []).filter(number => !ignoredNumbers.has(number))
+    );
+
+    return (ticketA?.numbers || []).filter(
+        number => !ignoredNumbers.has(number) && second.has(number)
+    ).length;
+}
+
+function getSecondaryDiversityPenalty(ticket, tickets) {
+    let penalty = 0;
+
+    if (currentGame === games.euro) {
+        const usage = new Map();
+        tickets.forEach(item => (item.euroNumbers || []).forEach(number => {
+            usage.set(number, (usage.get(number) || 0) + 1);
+        }));
+        (ticket.euroNumbers || []).forEach(number => {
+            const count = usage.get(number) || 0;
+            penalty += count * count * 6;
+        });
+    }
+
+    if (currentGame === games.extra) {
+        const usage = new Map();
+        tickets.forEach(item => (item.extraNumber || []).forEach(number => {
+            usage.set(number, (usage.get(number) || 0) + 1);
+        }));
+        (ticket.extraNumber || []).forEach(number => {
+            const count = usage.get(number) || 0;
+            penalty += count * count * 4;
+        });
+    }
+
+    return penalty;
+}
+
+function evaluateBatchCandidateDiversity(ticket, tickets, requested, ignoredNumbers = new Set()) {
+    if (!tickets.length) {
+        return {
+            hardValid: true,
+            score: 0,
+            maxOverlap: 0,
+            pairOverlapExcess: 0,
+            usageExcess: 0
+        };
+    }
+
+    const targetCount = ticket.targetCount || ticket.numbers?.length || getGeneratorTargetCount();
+    const limits = getBatchDiversityLimits(requested, targetCount, ignoredNumbers.size);
+    const usage = getBatchMainUsage(tickets, ignoredNumbers);
+    const overlaps = tickets.map(item => getTicketMainOverlap(ticket, item, ignoredNumbers));
+    const maxOverlap = overlaps.length ? Math.max(...overlaps) : 0;
+    const totalOverlap = overlaps.reduce((sum, value) => sum + value, 0);
+
+    const pairOverlapExcess = overlaps.reduce(
+        (sum, value) => sum + Math.max(0, value - limits.maxPairOverlap),
+        0
+    );
+
+    let usageExcess = 0;
+    let concentrationPenalty = 0;
+
+    (ticket.numbers || []).forEach(number => {
+        if (ignoredNumbers.has(number)) return;
+        const nextUsage = (usage.get(number) || 0) + 1;
+        usageExcess += Math.max(0, nextUsage - limits.maxNumberUsage);
+        concentrationPenalty += Math.max(0, nextUsage - 1) ** 2;
+    });
+
+    // Twarde przekroczenia dostają ogromną karę. Wśród poprawnych kandydatów
+    // wybieramy ten, który ma najmniej wspólnych i najmniej "zajechanych" liczb.
+    const score =
+        pairOverlapExcess * 10000 +
+        usageExcess * 8000 +
+        maxOverlap * 180 +
+        totalOverlap * 45 +
+        concentrationPenalty * 20 +
+        getSecondaryDiversityPenalty(ticket, tickets);
+
+    return {
+        hardValid: pairOverlapExcess === 0 && usageExcess === 0,
+        score,
+        maxOverlap,
+        pairOverlapExcess,
+        usageExcess,
+        limits
+    };
+}
+
+function getBatchDiversitySummary(tickets, ignoredNumbers = new Set()) {
+    if (!Array.isArray(tickets) || tickets.length < 2) {
+        return { maxOverlap: 0, averageOverlap: 0, mostUsed: [], maxUsage: 1 };
+    }
+
+    const overlaps = [];
+    for (let i = 0; i < tickets.length; i++) {
+        for (let j = i + 1; j < tickets.length; j++) {
+            overlaps.push(getTicketMainOverlap(tickets[i], tickets[j], ignoredNumbers));
+        }
+    }
+
+    const usage = [...getBatchMainUsage(tickets, ignoredNumbers).entries()]
+        .sort((a, b) => b[1] - a[1] || a[0] - b[0]);
+    const maxUsage = usage[0]?.[1] || 1;
+    const mostUsed = usage.filter(([, count]) => count === maxUsage).map(([number]) => number);
+
+    const targetCount = tickets[0]?.targetCount || tickets[0]?.numbers?.length || getGeneratorTargetCount();
+    const limits = getBatchDiversityLimits(tickets.length, targetCount, ignoredNumbers.size);
+
+    return {
+        maxOverlap: overlaps.length ? Math.max(...overlaps) : 0,
+        averageOverlap: overlaps.length
+            ? overlaps.reduce((sum, value) => sum + value, 0) / overlaps.length
+            : 0,
+        mostUsed,
+        maxUsage,
+        limits
+    };
+}
+
 function renderTicketBatch(tickets, options = {}) {
     const numbersDiv = document.getElementById("numbers");
     const stats = document.getElementById("stats");
@@ -1030,6 +1296,7 @@ function renderTicketBatch(tickets, options = {}) {
 
     const title = options.title || "Wygenerowane kupony";
     const subtitle = options.subtitle || "";
+    const gameKey = getCurrentGameKey();
 
     numbersDiv.innerHTML = `
         <div class="ticket-batch-grid">
@@ -1064,7 +1331,27 @@ function renderTicketBatch(tickets, options = {}) {
                 </article>
             `).join("")}
         </div>
+
+        <section class="ticket-quick-copy-panel">
+            <div class="ticket-quick-copy-head">
+                <div>
+                    <span>⚡ SZYBKI TRANSFER DO LABORATORIUM</span>
+                    <strong>Kupony jeden pod drugim — gotowe do kopiowania</strong>
+                </div>
+                <small>${tickets.length} ${tickets.length === 1 ? "zestaw" : "zestawów"}</small>
+            </div>
+            <textarea id="ticketQuickCopyText" readonly rows="${Math.min(10, Math.max(3, tickets.length + 1))}"></textarea>
+            <div class="ticket-quick-copy-actions">
+                <button type="button" id="ticketQuickCopyBtn" class="lab-secondary-btn">📋 Kopiuj wszystkie</button>
+                <button type="button" id="ticketQuickLabBtn" class="primary-btn">🧪 Otwórz w Laboratorium</button>
+            </div>
+            <small class="ticket-quick-copy-hint">Format jest zgodny z Laboratorium. Możesz skopiować całość albo wysłać pakiet bezpośrednio jednym kliknięciem.</small>
+        </section>
     `;
+
+    const quickCopyArea = document.getElementById("ticketQuickCopyText");
+    if (quickCopyArea) quickCopyArea.value = formatTicketsForLaboratory(tickets, gameKey);
+    bindTicketQuickCopyEvents(tickets, gameKey);
 
     stats.innerHTML = `
         <div class="stats-card ticket-batch-summary">
@@ -1076,6 +1363,15 @@ function renderTicketBatch(tickets, options = {}) {
                 <div class="stat"><span>Powtórzenia między kuponami</span><strong>0</strong></div>
                 <div class="stat"><span>Liczba PLUS</span><strong>na pewno na 1 z 8 kuponów</strong></div>
                 <p class="ticket-batch-warning">Przy 8 zakładach z opcją Plus pełne pokrycie 1–80 gwarantuje, że jeden kupon zawiera wylosowanego Plusa. To oznacza gwarantowaną wygraną z Plusa, ale nie gwarantuje, że łączna wypłata przewyższy koszt całego pakietu.</p>
+            ` : ""}
+            ${options.diversity && tickets.length > 1 ? `
+                <div class="stat"><span>Max wspólnych liczb / para kuponów</span><strong>${options.diversity.maxOverlap}</strong></div>
+                <div class="stat"><span>Średnio wspólnych liczb / para</span><strong>${options.diversity.averageOverlap.toFixed(2)}</strong></div>
+                <div class="stat"><span>Najwyższa częstotliwość jednej liczby</span><strong>${options.diversity.maxUsage}×</strong></div>
+                <div class="stat"><span>Limit zwykłej liczby w pakiecie</span><strong>${options.diversity.limits?.maxNumberUsage ?? "—"}×</strong></div>
+                <div class="stat"><span>Cel max wspólnych / para</span><strong>${options.diversity.limits?.maxPairOverlap ?? "—"}</strong></div>
+                ${options.diversity.maxUsage > (options.diversity.limits?.maxNumberUsage ?? Infinity) ? `<p class="ticket-batch-warning">⚠️ Aktywne filtry wymusiły przekroczenie docelowego limitu powtórzeń. Pakiet jest najlepszym znalezionym kompromisem.</p>` : ""}
+                ${options.forcedMainNumbers?.length ? `<div class="stat"><span>Wymuszone na każdym kuponie</span><strong>${options.forcedMainNumbers.join(", ")}</strong></div>` : ""}
             ` : ""}
             ${subtitle ? `<p class="ticket-batch-summary-note">${subtitle}</p>` : ""}
         </div>
@@ -1171,41 +1467,107 @@ function generateTicketBatch(autoForgePlanFactory = null, options = {}) {
 
     const tickets = [];
     const seen = new Set();
-    let attempts = 0;
-    const maxAttempts = Math.max(30, requested * 40);
+    const forcedMainNumbers = getBatchForcedMainNumbers();
+    const batchLimits = getBatchDiversityLimits(
+        requested,
+        getGeneratorTargetCount(),
+        forcedMainNumbers.size
+    );
 
-    while (tickets.length < requested && attempts < maxAttempts) {
-        attempts++;
-        const plan = typeof autoForgePlanFactory === "function"
-            ? autoForgePlanFactory()
-            : null;
-        const numbers = generateMiniLotto(0, plan);
-        if (!Array.isArray(numbers) || !lastGeneratedTicketMeta) break;
+    // Każdy kupon nadal przechodzi dokładnie przez te same filtry.
+    // Różnica: nie akceptujemy pierwszego lepszego wyniku. Dla każdego miejsca
+    // w pakiecie generujemy pulę kandydatów i wybieramy najmniej podobnego
+    // do kuponów już przyjętych.
+    for (let slot = 0; slot < requested; slot++) {
+        const candidateBudget = slot === 0
+            ? 1
+            : (requested <= 8 ? 72 : 42);
 
-        const ticket = {
-            ...lastGeneratedTicketMeta,
-            autoForgePlan: plan
-        };
-        const key = getTicketUniquenessKey(ticket);
-        if (seen.has(key)) continue;
+        let bestCandidate = null;
+        let bestAssessment = null;
+        const localKeys = new Set();
 
+        for (let candidateIndex = 0; candidateIndex < candidateBudget; candidateIndex++) {
+            activeBatchDiversityUsage = getBatchMainUsage(tickets, forcedMainNumbers);
+            activeBatchDiversityIgnored = forcedMainNumbers;
+            activeBatchDiversityMaxUsage = batchLimits.maxNumberUsage;
+
+            const plan = typeof autoForgePlanFactory === "function"
+                ? autoForgePlanFactory()
+                : null;
+            const numbers = generateMiniLotto(0, plan);
+
+            activeBatchDiversityUsage = null;
+            activeBatchDiversityIgnored = new Set();
+            activeBatchDiversityMaxUsage = null;
+
+            if (!Array.isArray(numbers) || !lastGeneratedTicketMeta) {
+                continue;
+            }
+
+            const ticket = {
+                ...lastGeneratedTicketMeta,
+                autoForgePlan: plan
+            };
+            const key = getTicketUniquenessKey(ticket);
+
+            if (seen.has(key) || localKeys.has(key)) continue;
+            localKeys.add(key);
+
+            const assessment = evaluateBatchCandidateDiversity(
+                ticket,
+                tickets,
+                requested,
+                forcedMainNumbers
+            );
+
+            if (
+                !bestCandidate ||
+                assessment.score < bestAssessment.score ||
+                (assessment.score === bestAssessment.score && assessment.maxOverlap < bestAssessment.maxOverlap)
+            ) {
+                bestCandidate = ticket;
+                bestAssessment = assessment;
+            }
+
+            // Kandydat bez wspólnych liczb (poza naprawdę wymuszonymi)
+            // nie wymaga dalszego szukania.
+            if (assessment.hardValid && assessment.maxOverlap === 0) {
+                break;
+            }
+        }
+
+        if (!bestCandidate) break;
+
+        const key = getTicketUniquenessKey(bestCandidate);
         seen.add(key);
-        tickets.push(ticket);
+        tickets.push(bestCandidate);
     }
+
+    activeBatchDiversityUsage = null;
+    activeBatchDiversityIgnored = new Set();
+    activeBatchDiversityMaxUsage = null;
 
     if (!tickets.length) return [];
 
+    const diversity = getBatchDiversitySummary(tickets, forcedMainNumbers);
+    const diversityText = tickets.length > 1
+        ? `Różnorodność pakietu: maks. ${diversity.maxOverlap} wspólnych liczb pomiędzy dwoma kuponami; najczęściej użyta liczba wystąpiła ${diversity.maxUsage}×.`
+        : "";
+
     renderTicketBatch(tickets, {
         title: options.title || "Pakiet wygenerowanych kuponów",
+        diversity,
+        forcedMainNumbers: [...forcedMainNumbers],
         subtitle: tickets.length < requested
-            ? `Udało się utworzyć ${tickets.length} różnych zestawów z ${requested}. Aktywne filtry mogą mocno ograniczać liczbę możliwych kuponów.`
-            : (options.subtitle || "Każdy zestaw przeszedł przez te same aktywne filtry.")
+            ? `Udało się utworzyć ${tickets.length} sensownie zróżnicowanych zestawów z ${requested}. Aktywne filtry mogą mocno ograniczać przestrzeń możliwych kuponów. ${diversityText}`
+            : `${options.subtitle || "Każdy zestaw przeszedł przez te same aktywne filtry."} ${diversityText}`
     });
 
     if (tickets.length < requested) {
         alert(
-            `⚠️ Wygenerowano ${tickets.length} różnych kuponów z ${requested}.\n\n` +
-            `Filtry są prawdopodobnie tak ciasne, że generator szybko trafia na duplikaty.`
+            `⚠️ Wygenerowano ${tickets.length} zróżnicowanych kuponów z ${requested}.\n\n` +
+            `Filtry są prawdopodobnie tak ciasne, że nie da się utworzyć pełnego pakietu bez nadmiernego powtarzania tych samych układów.`
         );
     }
 
@@ -3247,11 +3609,13 @@ function getAutoForgeWeightedRandomIndex(pool, plan, selectedNumbers = []) {
 
     // Nadal zostawiamy RNG, ale mocniej przechylamy je w stronę najlepiej
     // ocenionych liczb. Dzięki bazowej wadze słabszy kandydat nie ma zera.
-    const weights = scored.map(item => {
+    const weights = scored.map((item, index) => {
         const normalized = clamp(item.score / maxScore, 0, 1);
-        return 0.10 + Math.pow(normalized, 2.15) * 3.40;
+        const baseWeight = 0.10 + Math.pow(normalized, 2.15) * 3.40;
+        return baseWeight * getActiveBatchDiversityMultiplier(pool[index]);
     });
     const total = weights.reduce((a, b) => a + b, 0);
+    if (total <= 0) return getBatchAwareRandomIndex(pool);
 
     let roll = Math.random() * total;
     for (let i = 0; i < weights.length; i++) {
@@ -3355,15 +3719,18 @@ function buildAutoForgeTicketExplanations(numbers, plan) {
 function getWeightedRandomIndex(pool, numberScores = []) {
     if (!pool.length) return -1;
     if (!numberScores || !numberScores.length) {
-        return Math.floor(Math.random() * pool.length);
+        return getBatchAwareRandomIndex(pool);
     }
 
     const rawScores = pool.map(number =>
         Math.max(0, Number(numberScores[number]) || 0)
     );
     const maxScore = Math.max(...rawScores, 0.0001);
-    const weights = rawScores.map(score => 0.30 + (score / maxScore) * 1.70);
+    const weights = rawScores.map((score, index) =>
+        (0.30 + (score / maxScore) * 1.70) * getActiveBatchDiversityMultiplier(pool[index])
+    );
     const total = weights.reduce((a, b) => a + b, 0);
+    if (total <= 0) return getBatchAwareRandomIndex(pool);
 
     let roll = Math.random() * total;
     for (let i = 0; i < weights.length; i++) {
@@ -4133,7 +4500,7 @@ function drawRequiredNumbers(excludedNumbers = [], excludeFilter = false) {
     const selected = [];
 
     for (let i = 0; i < settings.count; i++) {
-        const randomIndex = Math.floor(Math.random() * pool.length);
+        const randomIndex = getBatchAwareRandomIndex(pool);
         selected.push(pool.splice(randomIndex, 1)[0]);
     }
 
@@ -5840,6 +6207,8 @@ function initializeStatsDashboard() {
 
 function pokazStatystyki() {
 
+    contentArea.classList.remove("lab-view");
+
     // Widok statystyk korzysta z własnego układu kolumnowego.
     // Bez tego #contentArea (flex w generatorze) rozciągał panele na całą wysokość ekranu.
     contentArea.classList.add("stats-view");
@@ -6626,4 +6995,867 @@ if (currentGame === games.multi) {
     });
 }
 
+}
+
+// =========================================================
+// LOTTOFORGE — LABORATORIUM 2.0 / WSZYSTKIE GRY
+// Każdy zapisany pakiet dotyczy JEDNEGO następnego losowania danej gry.
+// Obsługa: Mini Lotto, Lotto, EuroJackpot, Multi Multi, Extra Pensja.
+// =========================================================
+const LOTTOFORGE_LAB_STORAGE_KEY = "lottoForgeLab.v2";
+const LOTTOFORGE_LAB_LEGACY_KEY = "lottoForgeLabMini.v1";
+let laboratoryGameKey = "mini";
+let laboratoryDraft = null;
+
+const LAB_GAME_CONFIGS = {
+    mini: {
+        key: "mini",
+        label: "Mini Lotto",
+        icon: "🎲",
+        max: 42,
+        baseCount: 5,
+        minCount: 5,
+        maxCount: 12,
+        supportsSystem: true,
+        secondary: null
+    },
+    lotto: {
+        key: "lotto",
+        label: "Lotto",
+        icon: "🎯",
+        max: 49,
+        baseCount: 6,
+        minCount: 6,
+        maxCount: 12,
+        supportsSystem: true,
+        secondary: null
+    },
+    euro: {
+        key: "euro",
+        label: "EuroJackpot",
+        icon: "⭐",
+        max: 50,
+        baseCount: 5,
+        minCount: 5,
+        maxCount: 5,
+        supportsSystem: false,
+        secondary: { label: "Euro", count: 2, max: 12, drawField: "euroNumbers" }
+    },
+    multi: {
+        key: "multi",
+        label: "Multi Multi",
+        icon: "🔥",
+        max: 80,
+        baseCount: 20,
+        minCount: 1,
+        maxCount: 10,
+        supportsSystem: false,
+        secondary: null
+    },
+    extra: {
+        key: "extra",
+        label: "Extra Pensja",
+        icon: "💰",
+        max: 35,
+        baseCount: 5,
+        minCount: 5,
+        maxCount: 5,
+        supportsSystem: false,
+        secondary: { label: "Extra", count: 1, max: 4, drawField: "extraNumber" }
+    }
+};
+
+function getLaboratoryConfig(gameKey = laboratoryGameKey) {
+    return LAB_GAME_CONFIGS[gameKey] || LAB_GAME_CONFIGS.mini;
+}
+
+function normalizeLaboratoryEntry(entry) {
+    if (!entry || typeof entry !== "object") return null;
+    const gameKey = LAB_GAME_CONFIGS[entry.gameKey] ? entry.gameKey : "mini";
+    const numbers = Array.isArray(entry.numbers) ? entry.numbers.map(Number).filter(Number.isFinite) : [];
+    return {
+        ...entry,
+        gameKey,
+        systemSize: Number(entry.systemSize || numbers.length || LAB_GAME_CONFIGS[gameKey].minCount),
+        numbers,
+        secondaryNumbers: Array.isArray(entry.secondaryNumbers)
+            ? entry.secondaryNumbers.map(Number).filter(Number.isFinite)
+            : [],
+        status: entry.status === "checked" ? "checked" : "waiting"
+    };
+}
+
+function loadLaboratoryEntries() {
+    try {
+        const currentRaw = localStorage.getItem(LOTTOFORGE_LAB_STORAGE_KEY);
+        if (currentRaw) {
+            const parsed = JSON.parse(currentRaw);
+            return Array.isArray(parsed) ? parsed.map(normalizeLaboratoryEntry).filter(Boolean) : [];
+        }
+
+        // Migracja z pierwszej wersji Mini Lotto — bez utraty dotychczasowych testów.
+        const legacyRaw = localStorage.getItem(LOTTOFORGE_LAB_LEGACY_KEY);
+        if (legacyRaw) {
+            const legacy = JSON.parse(legacyRaw);
+            if (Array.isArray(legacy)) {
+                const migrated = legacy.map(normalizeLaboratoryEntry).filter(Boolean);
+                localStorage.setItem(LOTTOFORGE_LAB_STORAGE_KEY, JSON.stringify(migrated));
+                return migrated;
+            }
+        }
+
+        return [];
+    } catch (error) {
+        console.warn("Laboratorium: nie udało się odczytać danych.", error);
+        return [];
+    }
+}
+
+function saveLaboratoryEntries(entries) {
+    try {
+        localStorage.setItem(LOTTOFORGE_LAB_STORAGE_KEY, JSON.stringify(entries));
+        return true;
+    } catch (error) {
+        console.error("Laboratorium: nie udało się zapisać danych.", error);
+        alert("❌ Nie udało się zapisać Laboratorium w pamięci przeglądarki.");
+        return false;
+    }
+}
+
+function makeLaboratoryId() {
+    return `lab-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function getLaboratoryDraws(gameKey = laboratoryGameKey) {
+    return sortDrawsChronologically(losowaniaGier[gameKey] || []);
+}
+
+function parsePolishDrawDate(dateString) {
+    const match = String(dateString || "").match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+    if (!match) return null;
+    const [, day, month, year] = match;
+    const date = new Date(Number(year), Number(month) - 1, Number(day));
+    date.setHours(0, 0, 0, 0);
+    return date;
+}
+
+function formatLaboratoryCreatedAt(isoString) {
+    const date = new Date(isoString);
+    if (Number.isNaN(date.getTime())) return "—";
+    return date.toLocaleString("pl-PL", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit"
+    });
+}
+
+function laboratoryCombination(n, k) {
+    if (!Number.isInteger(n) || !Number.isInteger(k) || k < 0 || n < 0 || k > n) return 0;
+    if (k === 0 || k === n) return 1;
+    const safeK = Math.min(k, n - k);
+    let result = 1;
+    for (let i = 1; i <= safeK; i++) result = result * (n - safeK + i) / i;
+    return Math.round(result);
+}
+
+function buildLaboratorySystemBreakdown(systemSize, baseCount, hitCount) {
+    const totalBets = laboratoryCombination(systemSize, baseCount);
+    const tierCounts = {};
+
+    for (let tier = baseCount; tier >= 0; tier--) {
+        const matching = laboratoryCombination(hitCount, tier);
+        const missing = laboratoryCombination(systemSize - hitCount, baseCount - tier);
+        const count = matching * missing;
+        if (count > 0) tierCounts[tier] = count;
+    }
+
+    return { totalBets, tierCounts };
+}
+
+function findLaboratoryTargetDraw(entry, draws) {
+    if (!draws.length) return null;
+
+    if (Number.isFinite(Number(entry.anchorDrawNumber))) {
+        const anchorNumber = Number(entry.anchorDrawNumber);
+        const byNumber = draws
+            .filter(draw => Number(draw.numer) > anchorNumber)
+            .sort((a, b) => Number(a.numer) - Number(b.numer));
+        if (byNumber.length) return byNumber[0];
+    }
+
+    if (entry.anchorDrawDate) {
+        const anchorDate = parsePolishDrawDate(entry.anchorDrawDate);
+        if (anchorDate) {
+            const byDate = draws.find(draw => {
+                const date = parsePolishDrawDate(draw.data);
+                return date && date.getTime() > anchorDate.getTime();
+            });
+            if (byDate) return byDate;
+        }
+    }
+
+    const created = new Date(entry.createdAt);
+    if (!Number.isNaN(created.getTime())) {
+        created.setHours(0, 0, 0, 0);
+        return draws.find(draw => {
+            const date = parsePolishDrawDate(draw.data);
+            return date && date.getTime() > created.getTime();
+        }) || null;
+    }
+
+    return null;
+}
+
+function getDrawSecondaryNumbers(draw, config) {
+    if (!config.secondary) return [];
+    const raw = draw?.[config.secondary.drawField];
+    if (Array.isArray(raw)) return raw.map(Number).filter(Number.isFinite);
+    if (Number.isFinite(Number(raw))) return [Number(raw)];
+    return [];
+}
+
+function evaluateLaboratoryEntry(entry, draw) {
+    const config = getLaboratoryConfig(entry.gameKey);
+    const drawSet = new Set((draw.liczby || []).map(Number));
+    const hitNumbers = entry.numbers.filter(number => drawSet.has(Number(number)));
+    const drawSecondaryNumbers = getDrawSecondaryNumbers(draw, config);
+    const secondarySet = new Set(drawSecondaryNumbers);
+    const secondaryHitNumbers = (entry.secondaryNumbers || []).filter(number => secondarySet.has(Number(number)));
+
+    let totalBets = 1;
+    let tierCounts = {};
+    if (config.supportsSystem) {
+        const breakdown = buildLaboratorySystemBreakdown(entry.systemSize, config.baseCount, hitNumbers.length);
+        totalBets = breakdown.totalBets;
+        tierCounts = breakdown.tierCounts;
+    }
+
+    return {
+        drawNumber: Number(draw.numer),
+        drawDate: draw.data,
+        drawNumbers: [...draw.liczby].sort((a, b) => a - b),
+        drawSecondaryNumbers: [...drawSecondaryNumbers].sort((a, b) => a - b),
+        hitNumbers: [...hitNumbers].sort((a, b) => a - b),
+        hitCount: hitNumbers.length,
+        secondaryHitNumbers: [...secondaryHitNumbers].sort((a, b) => a - b),
+        secondaryHitCount: secondaryHitNumbers.length,
+        totalBets,
+        tierCounts,
+        checkedAt: new Date().toISOString()
+    };
+}
+
+function resolveLaboratoryEntries(gameKey = null) {
+    const entries = loadLaboratoryEntries();
+    if (!entries.length) return 0;
+
+    let resolvedCount = 0;
+    let changed = false;
+
+    entries.forEach(entry => {
+        if (entry.status === "checked") return;
+        if (gameKey && entry.gameKey !== gameKey) return;
+
+        const draws = getLaboratoryDraws(entry.gameKey);
+        if (!draws.length) return;
+        const targetDraw = findLaboratoryTargetDraw(entry, draws);
+        if (!targetDraw) return;
+
+        entry.status = "checked";
+        entry.result = evaluateLaboratoryEntry(entry, targetDraw);
+        changed = true;
+        resolvedCount++;
+    });
+
+    if (changed) saveLaboratoryEntries(entries);
+    return resolvedCount;
+}
+
+function parseLaboratoryNumberTokens(text) {
+    const matches = String(text || "").match(/\d+/g) || [];
+    return matches.map(Number);
+}
+
+function parseLaboratoryLines(rawText, gameKey, expectedCount) {
+    const config = getLaboratoryConfig(gameKey);
+    const lines = String(rawText || "")
+        .split(/\r?\n/)
+        .map(line => line.trim())
+        .filter(Boolean);
+
+    const valid = [];
+    const errors = [];
+
+    lines.forEach((line, index) => {
+        const parts = line.split("|").map(part => part.trim());
+        const numbers = parseLaboratoryNumberTokens(parts[0]);
+        const secondaryNumbers = config.secondary
+            ? parseLaboratoryNumberTokens(parts.slice(1).join(" "))
+            : [];
+
+        if (numbers.length !== expectedCount) {
+            errors.push(`Linia ${index + 1}: oczekiwano ${expectedCount} liczb głównych, jest ${numbers.length}.`);
+            return;
+        }
+        if (numbers.some(number => !Number.isInteger(number) || number < 1 || number > config.max)) {
+            errors.push(`Linia ${index + 1}: liczby główne muszą być z zakresu 1–${config.max}.`);
+            return;
+        }
+        if (new Set(numbers).size !== numbers.length) {
+            errors.push(`Linia ${index + 1}: liczby główne zawierają powtórkę.`);
+            return;
+        }
+
+        if (config.secondary) {
+            if (secondaryNumbers.length !== config.secondary.count) {
+                errors.push(`Linia ${index + 1}: po znaku | oczekiwano ${config.secondary.count} ${config.secondary.label}, jest ${secondaryNumbers.length}.`);
+                return;
+            }
+            if (secondaryNumbers.some(number => !Number.isInteger(number) || number < 1 || number > config.secondary.max)) {
+                errors.push(`Linia ${index + 1}: ${config.secondary.label} muszą być z zakresu 1–${config.secondary.max}.`);
+                return;
+            }
+            if (new Set(secondaryNumbers).size !== secondaryNumbers.length) {
+                errors.push(`Linia ${index + 1}: część ${config.secondary.label} zawiera powtórkę.`);
+                return;
+            }
+        }
+
+        valid.push({
+            numbers: [...numbers].sort((a, b) => a - b),
+            secondaryNumbers: [...secondaryNumbers].sort((a, b) => a - b)
+        });
+    });
+
+    return { valid, errors, sourceLineCount: lines.length };
+}
+
+function formatTicketForLaboratory(ticket, gameKey) {
+    const config = getLaboratoryConfig(gameKey);
+    const main = (ticket.numbers || [])
+        .map(number => String(number).padStart(2, "0"))
+        .join(" ");
+
+    if (!config.secondary) return main;
+
+    const secondary = gameKey === "euro"
+        ? (ticket.euroNumbers || [])
+        : (ticket.extraNumber || []);
+
+    return `${main} | ${secondary.map(number => String(number).padStart(2, "0")).join(" ")}`;
+}
+
+function formatTicketsForLaboratory(tickets, gameKey) {
+    return tickets.map(ticket => formatTicketForLaboratory(ticket, gameKey)).join("\n");
+}
+
+async function copyLaboratoryText(textValue, button = null) {
+    try {
+        await navigator.clipboard.writeText(textValue);
+    } catch (error) {
+        const temp = document.createElement("textarea");
+        temp.value = textValue;
+        temp.style.position = "fixed";
+        temp.style.opacity = "0";
+        document.body.appendChild(temp);
+        temp.focus();
+        temp.select();
+        document.execCommand("copy");
+        temp.remove();
+    }
+
+    if (button) {
+        const oldText = button.textContent;
+        button.textContent = "✅ Skopiowano";
+        setTimeout(() => { button.textContent = oldText; }, 1200);
+    }
+}
+
+function bindTicketQuickCopyEvents(tickets, gameKey) {
+    const copyBtn = document.getElementById("ticketQuickCopyBtn");
+    const labBtn = document.getElementById("ticketQuickLabBtn");
+    const area = document.getElementById("ticketQuickCopyText");
+
+    copyBtn?.addEventListener("click", () => copyLaboratoryText(area?.value || "", copyBtn));
+    labBtn?.addEventListener("click", () => {
+        const text = formatTicketsForLaboratory(tickets, gameKey);
+        laboratoryDraft = {
+            gameKey,
+            text,
+            mainCount: Number(tickets[0]?.targetCount || getLaboratoryConfig(gameKey).minCount)
+        };
+        showLaboratory(gameKey);
+    });
+}
+
+function saveLaboratoryBatch() {
+    const config = getLaboratoryConfig(laboratoryGameKey);
+    const countSelect = document.getElementById("labSystemCount");
+    const setsInput = document.getElementById("labSetsInput");
+    const labelInput = document.getElementById("labBatchLabel");
+    if (!countSelect || !setsInput) return;
+
+    const systemSize = Number(countSelect.value);
+    const parsed = parseLaboratoryLines(setsInput.value, laboratoryGameKey, systemSize);
+
+    if (!parsed.sourceLineCount) {
+        alert("🧪 Wpisz przynajmniej jeden zestaw — jeden zestaw w jednej linii.");
+        return;
+    }
+    if (parsed.errors.length) {
+        alert(`❌ Nie zapisano zestawów:\n\n${parsed.errors.join("\n")}`);
+        return;
+    }
+
+    const draws = getLaboratoryDraws(laboratoryGameKey);
+    const latest = draws.length ? draws[draws.length - 1] : null;
+    const entries = loadLaboratoryEntries();
+    const batchId = `batch-${Date.now()}`;
+    const batchLabel = String(labelInput?.value || "").trim();
+
+    parsed.valid.forEach((item, index) => {
+        entries.push({
+            id: makeLaboratoryId(),
+            batchId,
+            batchIndex: index + 1,
+            batchSize: parsed.valid.length,
+            label: batchLabel,
+            gameKey: laboratoryGameKey,
+            systemSize,
+            numbers: item.numbers,
+            secondaryNumbers: item.secondaryNumbers,
+            createdAt: new Date().toISOString(),
+            anchorDrawNumber: latest ? Number(latest.numer) : null,
+            anchorDrawDate: latest ? latest.data : null,
+            status: "waiting",
+            result: null
+        });
+    });
+
+    if (!saveLaboratoryEntries(entries)) return;
+
+    setsInput.value = "";
+    if (labelInput) labelInput.value = "";
+    if (laboratoryDraft?.gameKey === laboratoryGameKey) laboratoryDraft = null;
+    showLaboratory(laboratoryGameKey);
+
+    alert(
+        `✅ Laboratorium ${config.label} zapisało ${parsed.valid.length} ${parsed.valid.length === 1 ? "zestaw" : "zestawów"}.\n` +
+        (latest
+            ? `Każdy czeka na pierwsze losowanie po ${latest.data} (#${latest.numer}).`
+            : `Nie ma jeszcze wczytanej bazy ${config.label} — po kolejnym imporcie Laboratorium spróbuje dopasować pierwsze późniejsze losowanie.`)
+    );
+}
+
+function deleteLaboratoryEntry(entryId) {
+    const entries = loadLaboratoryEntries();
+    const target = entries.find(entry => entry.id === entryId);
+    if (!target) return;
+    if (!confirm("Usunąć ten zapis z Laboratorium?")) return;
+    saveLaboratoryEntries(entries.filter(entry => entry.id !== entryId));
+    showLaboratory(laboratoryGameKey);
+}
+
+function clearLaboratoryChecked() {
+    const entries = loadLaboratoryEntries();
+    const checkedCount = entries.filter(entry => entry.gameKey === laboratoryGameKey && entry.status === "checked").length;
+    if (!checkedCount) return;
+    if (!confirm(`Usunąć rozliczoną historię tej gry (${checkedCount})? Oczekujące zestawy zostaną.`)) return;
+    saveLaboratoryEntries(entries.filter(entry => !(entry.gameKey === laboratoryGameKey && entry.status === "checked")));
+    showLaboratory(laboratoryGameKey);
+}
+
+function exportLaboratoryJson() {
+    const entries = loadLaboratoryEntries();
+    const payload = {
+        app: "LottoForge",
+        module: "Laboratorium",
+        exportedAt: new Date().toISOString(),
+        version: 2,
+        entries
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `lottoforge-laboratorium-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+}
+
+function importLaboratoryJson() {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".json,application/json";
+    input.addEventListener("change", () => {
+        const file = input.files?.[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+            try {
+                const payload = JSON.parse(String(reader.result || "{}"));
+                const incomingRaw = Array.isArray(payload) ? payload : payload.entries;
+                if (!Array.isArray(incomingRaw)) throw new Error("Brak tablicy entries w kopii.");
+
+                const incoming = incomingRaw.map(normalizeLaboratoryEntry).filter(Boolean);
+                incoming.forEach(entry => { if (!entry.id) entry.id = makeLaboratoryId(); });
+                const existing = loadLaboratoryEntries();
+                const byId = new Map(existing.map(entry => [entry.id, entry]));
+                incoming.forEach(entry => byId.set(entry.id, entry));
+                const merged = [...byId.values()];
+                saveLaboratoryEntries(merged);
+                showLaboratory(laboratoryGameKey);
+                alert(`✅ Wczytano kopię Laboratorium. Łącznie zapisów: ${merged.length}.`);
+            } catch (error) {
+                alert(`❌ Nie udało się wczytać kopii JSON:\n\n${error.message}`);
+            }
+        };
+        reader.readAsText(file);
+    });
+    input.click();
+}
+
+function laboratoryNumbersHtml(numbers, hitNumbers = []) {
+    const hits = new Set(hitNumbers.map(Number));
+    return numbers.map(number => `
+        <span class="lab-number ${hits.has(Number(number)) ? "hit" : ""}">${String(number).padStart(2, "0")}</span>
+    `).join("");
+}
+
+function laboratorySystemLabel(entry) {
+    const config = getLaboratoryConfig(entry.gameKey);
+    if (entry.gameKey === "multi") return `Typ ${entry.systemSize} liczb`;
+    if (config.secondary) return `${config.baseCount} + ${config.secondary.count} ${config.secondary.label}`;
+    if (config.supportsSystem) return entry.systemSize === config.baseCount
+        ? `Zwykły zakład ${config.baseCount}`
+        : `System ${entry.systemSize}`;
+    return `${entry.systemSize} liczb`;
+}
+
+function laboratoryResultTone(hitCount, config) {
+    if (config.key === "multi") {
+        if (hitCount >= 7) return "jackpot";
+        if (hitCount >= 5) return "great";
+        if (hitCount >= 3) return "good";
+        if (hitCount === 2) return "medium";
+        return "quiet";
+    }
+    if (hitCount >= config.baseCount) return "jackpot";
+    if (hitCount === config.baseCount - 1) return "great";
+    if (hitCount === config.baseCount - 2) return "good";
+    if (hitCount === config.baseCount - 3) return "medium";
+    return "quiet";
+}
+
+function renderLaboratorySecondaryNumbers(entry, result = null) {
+    const config = getLaboratoryConfig(entry.gameKey);
+    if (!config.secondary) return "";
+    const hitNumbers = result?.secondaryHitNumbers || [];
+    return `
+        <div class="lab-secondary-numbers">
+            <span>${config.secondary.label}</span>
+            <div>${laboratoryNumbersHtml(entry.secondaryNumbers || [], hitNumbers)}</div>
+        </div>
+    `;
+}
+
+function renderLaboratoryPendingCard(entry) {
+    const config = getLaboratoryConfig(entry.gameKey);
+    const anchorText = entry.anchorDrawDate
+        ? `po ${entry.anchorDrawDate}${entry.anchorDrawNumber ? ` (#${entry.anchorDrawNumber})` : ""}`
+        : "po dniu zapisu";
+
+    return `
+        <article class="lab-ticket-card pending">
+            <div class="lab-ticket-head">
+                <div>
+                    <span class="lab-status waiting">OCZEKUJE</span>
+                    <strong>${config.icon} ${laboratorySystemLabel(entry)}</strong>
+                    ${entry.label ? `<small>${entry.label}</small>` : ""}
+                </div>
+                <button type="button" class="lab-icon-btn danger" data-lab-delete="${entry.id}" title="Usuń zapis">✕</button>
+            </div>
+            <div class="lab-ticket-numbers">${laboratoryNumbersHtml(entry.numbers)}</div>
+            ${renderLaboratorySecondaryNumbers(entry)}
+            <div class="lab-ticket-foot">
+                <span>Zapisano: <strong>${formatLaboratoryCreatedAt(entry.createdAt)}</strong></span>
+                <span>Cel: <strong>pierwsze losowanie ${anchorText}</strong></span>
+            </div>
+        </article>
+    `;
+}
+
+function renderLaboratorySystemBreakdown(entry, result) {
+    const config = getLaboratoryConfig(entry.gameKey);
+    if (!config.supportsSystem) return "";
+    const tiers = [config.baseCount, config.baseCount - 1, config.baseCount - 2];
+    return `
+        <div class="lab-system-breakdown">
+            ${tiers.map(tier => {
+                const count = Number(result.tierCounts?.[tier] || 0);
+                return `<div class="${count ? "active" : ""}"><span>${tier}/${config.baseCount}</span><strong>${count}</strong></div>`;
+            }).join("")}
+        </div>
+    `;
+}
+
+function renderLaboratoryCheckedCard(entry) {
+    const config = getLaboratoryConfig(entry.gameKey);
+    const result = entry.result || {};
+    const tone = laboratoryResultTone(Number(result.hitCount || 0), config);
+    const secondarySummary = config.secondary
+        ? `<span class="lab-secondary-hit">${config.secondary.label}: <strong>${Number(result.secondaryHitCount || 0)}/${config.secondary.count}</strong></span>`
+        : "";
+
+    return `
+        <article class="lab-ticket-card checked ${tone}">
+            <div class="lab-ticket-head">
+                <div>
+                    <span class="lab-status checked">ROZLICZONY</span>
+                    <strong>${config.icon} ${laboratorySystemLabel(entry)}</strong>
+                    ${entry.label ? `<small>${entry.label}</small>` : ""}
+                </div>
+                <div class="lab-hit-badge ${tone}">
+                    <span>TRAFIONE</span>
+                    <strong>${Number(result.hitCount || 0)}/${entry.systemSize}</strong>
+                    ${secondarySummary}
+                </div>
+            </div>
+
+            <div class="lab-ticket-numbers">${laboratoryNumbersHtml(entry.numbers, result.hitNumbers || [])}</div>
+            ${renderLaboratorySecondaryNumbers(entry, result)}
+
+            <div class="lab-result-grid">
+                <div>
+                    <span>Losowanie</span>
+                    <strong>${result.drawDate || "—"} ${result.drawNumber ? `#${result.drawNumber}` : ""}</strong>
+                </div>
+                <div>
+                    <span>Wylosowane</span>
+                    <strong>${(result.drawNumbers || []).map(number => String(number).padStart(2, "0")).join(" • ") || "—"}</strong>
+                </div>
+                <div>
+                    <span>Trafione liczby</span>
+                    <strong>${(result.hitNumbers || []).length ? result.hitNumbers.join(", ") : "brak"}</strong>
+                </div>
+                <div>
+                    <span>${config.supportsSystem ? "Zakładów systemowych" : "Typowanych liczb"}</span>
+                    <strong>${config.supportsSystem ? Number(result.totalBets || 1) : entry.systemSize}</strong>
+                </div>
+                ${config.secondary ? `
+                    <div>
+                        <span>Wylosowane ${config.secondary.label}</span>
+                        <strong>${(result.drawSecondaryNumbers || []).join(" • ") || "—"}</strong>
+                    </div>
+                    <div>
+                        <span>Trafione ${config.secondary.label}</span>
+                        <strong>${(result.secondaryHitNumbers || []).length ? result.secondaryHitNumbers.join(", ") : "brak"}</strong>
+                    </div>
+                ` : ""}
+            </div>
+
+            ${renderLaboratorySystemBreakdown(entry, result)}
+
+            <div class="lab-ticket-foot">
+                <span>Zapisano: <strong>${formatLaboratoryCreatedAt(entry.createdAt)}</strong></span>
+                <button type="button" class="lab-text-btn danger" data-lab-delete="${entry.id}">Usuń</button>
+            </div>
+        </article>
+    `;
+}
+
+function buildLaboratorySummary(entries) {
+    const waiting = entries.filter(entry => entry.status !== "checked");
+    const checked = entries.filter(entry => entry.status === "checked");
+    const bestHit = checked.length
+        ? Math.max(...checked.map(entry => Number(entry.result?.hitCount || 0)))
+        : 0;
+    const hit3Plus = checked.filter(entry => Number(entry.result?.hitCount || 0) >= 3).length;
+    return { waiting, checked, bestHit, hit3Plus };
+}
+
+function renderLaboratoryCountOptions(config, selectedCount) {
+    const values = Array.from({ length: config.maxCount - config.minCount + 1 }, (_, index) => config.minCount + index);
+    return values.map(value => {
+        let label = `${value}`;
+        if (config.key === "mini" || config.key === "lotto") {
+            label += value === config.baseCount ? " — zwykły zakład" : ` — system ${value}`;
+        } else if (config.key === "multi") {
+            label += " — typowanych liczb";
+        } else if (config.secondary) {
+            label += ` głównych + ${config.secondary.count} ${config.secondary.label}`;
+        }
+        return `<option value="${value}" ${value === selectedCount ? "selected" : ""}>${label}</option>`;
+    }).join("");
+}
+
+function getLaboratoryPlaceholder(config, count) {
+    const sampleMain = Array.from({ length: count }, (_, index) => String(index + 1).padStart(2, "0")).join(" ");
+    if (!config.secondary) return `${sampleMain}\n${sampleMain}`;
+    const secondary = Array.from({ length: config.secondary.count }, (_, index) => String(index + 1).padStart(2, "0")).join(" ");
+    return `${sampleMain} | ${secondary}`;
+}
+
+function bindLaboratoryEvents() {
+    document.getElementById("labSaveBatchBtn")?.addEventListener("click", saveLaboratoryBatch);
+    document.getElementById("labGameSelect")?.addEventListener("change", event => {
+        laboratoryDraft = laboratoryDraft?.gameKey === event.target.value ? laboratoryDraft : null;
+        showLaboratory(event.target.value);
+    });
+    document.getElementById("labCheckBtn")?.addEventListener("click", () => {
+        const resolved = resolveLaboratoryEntries(laboratoryGameKey);
+        showLaboratory(laboratoryGameKey);
+        const config = getLaboratoryConfig(laboratoryGameKey);
+        alert(resolved > 0
+            ? `✅ Rozliczono ${resolved} ${resolved === 1 ? "zestaw" : "zestawów"}.`
+            : `🧪 Brak nowych losowań ${config.label} do rozliczenia. Jeśli losowanie już było, wczytaj świeży plik przez Import danych.`);
+    });
+    document.getElementById("labExportBtn")?.addEventListener("click", exportLaboratoryJson);
+    document.getElementById("labImportJsonBtn")?.addEventListener("click", importLaboratoryJson);
+    document.getElementById("labClearCheckedBtn")?.addEventListener("click", clearLaboratoryChecked);
+
+    document.querySelectorAll("[data-lab-delete]").forEach(button => {
+        button.addEventListener("click", () => deleteLaboratoryEntry(button.dataset.labDelete));
+    });
+}
+
+function showLaboratory(gameKey = null) {
+    if (gameKey && LAB_GAME_CONFIGS[gameKey]) laboratoryGameKey = gameKey;
+    const config = getLaboratoryConfig(laboratoryGameKey);
+    currentGame = games[laboratoryGameKey];
+
+    contentArea.classList.remove("stats-view");
+    contentArea.classList.add("lab-view");
+
+    resolveLaboratoryEntries(laboratoryGameKey);
+
+    const entries = loadLaboratoryEntries()
+        .filter(entry => entry.gameKey === laboratoryGameKey)
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    const summary = buildLaboratorySummary(entries);
+    const draws = getLaboratoryDraws(laboratoryGameKey);
+    const latest = draws.length ? draws[draws.length - 1] : null;
+
+    const checkedSorted = [...summary.checked].sort((a, b) => {
+        const drawDiff = Number(b.result?.drawNumber || 0) - Number(a.result?.drawNumber || 0);
+        if (drawDiff !== 0) return drawDiff;
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
+
+    const draftMatches = laboratoryDraft?.gameKey === laboratoryGameKey;
+    const selectedCount = clamp(
+        Number(draftMatches ? laboratoryDraft.mainCount : config.minCount),
+        config.minCount,
+        config.maxCount
+    );
+    const draftText = draftMatches ? laboratoryDraft.text : "";
+
+    contentArea.innerHTML = `
+        <div class="lab-shell">
+            <div class="lab-hero">
+                <div>
+                    <span class="lab-kicker">🧪 LOTTOFORGE LAB 2.0</span>
+                    <h1>Laboratorium ${config.label}</h1>
+                    <p>Każdy zapisany pakiet czeka tylko na <strong>jedno następne losowanie</strong> wybranej gry. Dzisiaj typujesz, jutro wczytujesz świeże dane i LottoForge sam rozlicza wynik.</p>
+                    <div class="lab-game-switcher">
+                        <label for="labGameSelect">Gra w Laboratorium</label>
+                        <select id="labGameSelect">
+                            ${Object.values(LAB_GAME_CONFIGS).map(item => `
+                                <option value="${item.key}" ${item.key === laboratoryGameKey ? "selected" : ""}>${item.icon} ${item.label}</option>
+                            `).join("")}
+                        </select>
+                    </div>
+                </div>
+                <div class="lab-latest-draw ${latest ? "ready" : "warning"}">
+                    <span>OSTATNIA BAZA ${config.label.toUpperCase()}</span>
+                    <strong>${latest ? `${latest.data} • #${latest.numer}` : "brak wczytanych danych"}</strong>
+                    <small>${latest ? "Nowe zestawy będą czekały na kolejne losowanie po tej pozycji." : `Najlepiej najpierw wczytać aktualny plik ${config.label}.`}</small>
+                </div>
+            </div>
+
+            <div class="lab-summary-grid">
+                <div><span>Oczekujące</span><strong>${summary.waiting.length}</strong></div>
+                <div><span>Rozliczone</span><strong>${summary.checked.length}</strong></div>
+                <div><span>Najlepszy wynik</span><strong>${summary.checked.length ? `${summary.bestHit} traf.` : "—"}</strong></div>
+                <div><span>Testy 3+ trafień</span><strong>${summary.hit3Plus}</strong></div>
+            </div>
+
+            <section class="lab-create-panel">
+                <div class="lab-section-head">
+                    <div>
+                        <span>NOWY EKSPERYMENT</span>
+                        <h2>Zapisz dzisiejsze zestawy</h2>
+                    </div>
+                    <div class="lab-flow">GENERUJ → KOPIUJ/WKLEJ → ZAPISZ → CZEKAJ NA WYNIK</div>
+                </div>
+
+                <div class="lab-create-grid">
+                    <div class="lab-field compact">
+                        <label for="labSystemCount">${config.key === "multi" ? "Ile liczb typujesz?" : "Ile liczb głównych w zestawie?"}</label>
+                        <select id="labSystemCount" ${config.minCount === config.maxCount ? "disabled" : ""}>
+                            ${renderLaboratoryCountOptions(config, selectedCount)}
+                        </select>
+                    </div>
+
+                    <div class="lab-field">
+                        <label for="labBatchLabel">Nazwa / notatka <small>(opcjonalnie)</small></label>
+                        <input id="labBatchLabel" type="text" maxlength="80" placeholder="np. AUTO FORGE / system / test wieczorny">
+                    </div>
+                </div>
+
+                <div class="lab-field">
+                    <label for="labSetsInput">Zestawy — <strong>jeden kupon w jednej linii</strong></label>
+                    <textarea id="labSetsInput" rows="8" placeholder="${getLaboratoryPlaceholder(config, selectedCount)}"></textarea>
+                    <small>${config.secondary
+                        ? `Format: liczby główne | ${config.secondary.label}. Przykład: 01 12 23 34 45 | ${Array.from({ length: config.secondary.count }, (_, i) => i + 1).join(" ")}.`
+                        : `Wklej dowolną liczbę kuponów naraz. Każda linia musi mieć dokładnie ${selectedCount} liczb z poprawnego zakresu.`}</small>
+                </div>
+
+                <div class="lab-actions">
+                    <button type="button" id="labSaveBatchBtn" class="primary-btn">🧪 Zapisz zestawy na następne losowanie</button>
+                    <button type="button" id="labCheckBtn" class="lab-secondary-btn">✅ Sprawdź po imporcie</button>
+                    <button type="button" id="labExportBtn" class="lab-secondary-btn">💾 Kopia JSON</button>
+                    <button type="button" id="labImportJsonBtn" class="lab-secondary-btn">📥 Wczytaj JSON</button>
+                </div>
+            </section>
+
+            <section class="lab-section">
+                <div class="lab-section-head">
+                    <div>
+                        <span>KOLEJKA</span>
+                        <h2>⏳ Oczekujące na wynik</h2>
+                    </div>
+                    <strong class="lab-counter">${summary.waiting.length}</strong>
+                </div>
+                <div class="lab-ticket-list">
+                    ${summary.waiting.length
+                        ? summary.waiting.map(renderLaboratoryPendingCard).join("")
+                        : `<div class="lab-empty">Nie ma oczekujących zestawów ${config.label}. Dodaj dzisiejsze typy powyżej.</div>`}
+                </div>
+            </section>
+
+            <section class="lab-section history">
+                <div class="lab-section-head">
+                    <div>
+                        <span>ARCHIWUM TESTÓW</span>
+                        <h2>📚 Historia wyników</h2>
+                    </div>
+                    ${summary.checked.length ? `<button type="button" id="labClearCheckedBtn" class="lab-text-btn danger">Wyczyść rozliczoną historię tej gry</button>` : ""}
+                </div>
+                <div class="lab-ticket-list">
+                    ${checkedSorted.length
+                        ? checkedSorted.map(renderLaboratoryCheckedCard).join("")
+                        : `<div class="lab-empty">Historia ${config.label} jest pusta. Po kolejnym imporcie pojawią się tutaj rozliczone testy.</div>`}
+                </div>
+            </section>
+        </div>
+    `;
+
+    const setsInput = document.getElementById("labSetsInput");
+    if (setsInput && draftText) setsInput.value = draftText;
+    bindLaboratoryEvents();
 }
