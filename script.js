@@ -80,6 +80,7 @@ let analysisWindow = 20;
 let hotColdCount = 5;
 let autoForgeMode = "auto";
 let autoForgeSecondaryOverride = null;
+let autoForgeManualStructureOverride = null;
 let lastGeneratedTicketMeta = null;
 
 // AUTO FORGE — profile okien analizy zależne od gry.
@@ -1428,41 +1429,275 @@ function concentrateStructure(baseStructure, sectorScores, targetCount, level = 
     return result;
 }
 
-function buildAutoForgeStructureProfiles(baseStructure, sectorScores, targetCount) {
-    const profiles = [
+function parseStructureKey(structureKey) {
+    const parts = String(structureKey || "")
+        .split("-")
+        .map(value => Number(value));
+
+    if (
+        parts.length !== currentGame.ranges.length ||
+        parts.some(value => !Number.isInteger(value) || value < 0)
+    ) {
+        return null;
+    }
+
+    return parts;
+}
+
+function scaleObservedStructureToTarget(structure, targetCount, sectorScores = []) {
+    const source = Array.isArray(structure)
+        ? structure.map(value => Math.max(0, Number(value) || 0))
+        : [];
+
+    if (!source.length) return [];
+
+    const sourceTotal = source.reduce((a, b) => a + b, 0);
+    if (sourceTotal === targetCount) return [...source];
+
+    const capacities = currentGame.ranges.map((_, index) => getSectorBounds(index).capacity);
+    const maxSectorScore = Math.max(0.0001, ...sectorScores.map(value => Number(value) || 0));
+    const weightedSource = source.map((count, index) => {
+        if (count <= 0) return 0;
+        const sectorBoost = sectorScores.length
+            ? 1 + ((Number(sectorScores[index]) || 0) / maxSectorScore) * 0.08
+            : 1;
+        return count * sectorBoost;
+    });
+
+    const result = apportionScoreCounts(weightedSource, targetCount, capacities);
+    let total = result.reduce((a, b) => a + b, 0);
+
+    if (total < targetCount) {
+        const fallback = sectorScores
+            .map((score, index) => ({ score: Number(score) || 0, index }))
+            .sort((a, b) => b.score - a.score || a.index - b.index);
+
+        for (const item of fallback) {
+            while (total < targetCount && result[item.index] < capacities[item.index]) {
+                result[item.index]++;
+                total++;
+            }
+            if (total >= targetCount) break;
+        }
+    }
+
+    return result;
+}
+
+function getStructureTrendMetrics(sample, structureKey) {
+    const flags = (Array.isArray(sample) ? sample : []).map(draw =>
+        getStructureForNumbers(draw.liczby || []) === structureKey ? 1 : 0
+    );
+
+    if (!flags.length) {
+        return {
+            olderRate: 0,
+            newerRate: 0,
+            delta: 0,
+            direction: 0,
+            directionText: "→ STABILNIE",
+            directionShort: "→",
+            drawsAgo: null,
+            currentStreak: 0,
+            maxStreak: 0,
+            recencyScore: 0,
+            trendScore: 0.5
+        };
+    }
+
+    const split = Math.max(1, Math.floor(flags.length / 2));
+    const older = flags.slice(0, split);
+    const newer = flags.slice(split);
+    const olderRate = average(older);
+    const newerRate = newer.length ? average(newer) : olderRate;
+    const delta = newerRate - olderRate;
+    const threshold = Math.max(0.08, 0.45 / Math.max(2, flags.length));
+    const direction = delta > threshold ? 1 : delta < -threshold ? -1 : 0;
+
+    let lastIndex = -1;
+    for (let i = flags.length - 1; i >= 0; i--) {
+        if (flags[i]) {
+            lastIndex = i;
+            break;
+        }
+    }
+
+    const drawsAgo = lastIndex >= 0 ? flags.length - 1 - lastIndex : null;
+    let currentStreak = 0;
+    for (let i = flags.length - 1; i >= 0 && flags[i]; i--) currentStreak++;
+
+    let maxStreak = 0;
+    let run = 0;
+    flags.forEach(flag => {
+        if (flag) {
+            run++;
+            maxStreak = Math.max(maxStreak, run);
+        } else {
+            run = 0;
+        }
+    });
+
+    const recencyScore = drawsAgo === null
+        ? 0
+        : clamp(1 - drawsAgo / Math.max(1, flags.length - 1), 0, 1);
+    const trendScore = clamp(0.5 + delta * 1.4, 0, 1);
+
+    return {
+        olderRate,
+        newerRate,
+        delta,
+        direction,
+        directionText: direction > 0 ? "↑ W GÓRĘ" : direction < 0 ? "↓ W DÓŁ" : "→ STABILNIE",
+        directionShort: direction > 0 ? "↑" : direction < 0 ? "↓" : "→",
+        drawsAgo,
+        currentStreak,
+        maxStreak,
+        recencyScore,
+        trendScore
+    };
+}
+
+function buildObservedStructureRanking(draws, requestedWindows, weights, sectorScores = [], targetCount = getHistoricalDrawCount()) {
+    const sourceDraws = (Array.isArray(draws) ? draws : [])
+        .filter(draw => Array.isArray(draw.liczby) && draw.liczby.length);
+
+    if (!sourceDraws.length) return [];
+
+    const safeWindows = (Array.isArray(requestedWindows) ? requestedWindows : [sourceDraws.length])
+        .map(size => Math.max(1, Math.min(Number(size) || sourceDraws.length, sourceDraws.length)));
+    const safeWeights = safeWindows.map((_, index) => Number(weights?.[index]) || 0);
+    const weightTotal = safeWeights.reduce((a, b) => a + b, 0) || 1;
+    const maxWindow = Math.max(...safeWindows);
+    const anchorSample = sourceDraws.slice(-maxWindow);
+    const structureKeys = [...new Set(anchorSample.map(draw => getStructureForNumbers(draw.liczby || [])))];
+    const maxSectorScore = sectorScores.length
+        ? Math.max(0.0001, ...sectorScores.map(value => Number(value) || 0))
+        : 1;
+
+    return structureKeys.map(structureKey => {
+        const rawStructure = parseStructureKey(structureKey) || [];
+        const windowDetails = safeWindows.map((windowSize, index) => {
+            const sample = sourceDraws.slice(-windowSize);
+            const count = sample.filter(draw => getStructureForNumbers(draw.liczby || []) === structureKey).length;
+            return {
+                windowSize,
+                count,
+                rate: sample.length ? count / sample.length : 0,
+                weight: safeWeights[index]
+            };
+        });
+
+        const weightedRate = windowDetails.reduce(
+            (sum, item) => sum + item.rate * item.weight,
+            0
+        ) / weightTotal;
+
+        const count = anchorSample.filter(
+            draw => getStructureForNumbers(draw.liczby || []) === structureKey
+        ).length;
+        const rate = anchorSample.length ? count / anchorSample.length : 0;
+        const trend = getStructureTrendMetrics(anchorSample, structureKey);
+        const targetStructure = scaleObservedStructureToTarget(rawStructure, targetCount, sectorScores);
+        const sectorFit = targetStructure.length
+            ? targetStructure.reduce((sum, quota, index) => {
+                const normalized = sectorScores.length
+                    ? (Number(sectorScores[index]) || 0) / maxSectorScore
+                    : 0.5;
+                return sum + quota * normalized;
+            }, 0) / Math.max(1, targetCount)
+            : 0;
+
+        const score =
+            weightedRate * 60 +
+            trend.recencyScore * 15 +
+            trend.trendScore * 10 +
+            clamp(trend.maxStreak / 3, 0, 1) * 5 +
+            sectorFit * 10;
+
+        return {
+            key: structureKey,
+            structure: rawStructure,
+            targetStructure,
+            count,
+            windowSize: anchorSample.length,
+            rate,
+            weightedRate,
+            score,
+            sectorFit,
+            trend,
+            windowDetails
+        };
+    }).sort((a, b) =>
+        b.weightedRate - a.weightedRate ||
+        b.count - a.count ||
+        b.score - a.score ||
+        b.trend.recencyScore - a.trend.recencyScore ||
+        a.key.localeCompare(b.key)
+    );
+}
+
+function buildAutoForgeStructureProfiles(baseStructure, sectorScores, targetCount, activityRanking = []) {
+    const labels = [
         {
             key: "profile",
             label: "PROFILOWY",
             icon: "🧭",
-            description: "Najszerszy wariant. Trzyma kierunek i aktywne sektory, ale zostawia trochę zabezpieczenia poza głównym ogniem.",
-            structure: [...baseStructure]
+            fallbackDescription: "Najlepiej potwierdzona struktura w danych z wybranego horyzontu."
         },
         {
             key: "hot",
             label: "GORĄCY",
             icon: "🔥",
-            description: "Mocniej dociąża 2–3 najaktywniejsze sektory. Słabe dziesiątki mogą dostać zero.",
-            structure: concentrateStructure(baseStructure, sectorScores, targetCount, "hot")
+            fallbackDescription: "Druga aktualnie gorąca struktura — realna alternatywa z danych."
         },
         {
             key: "aggressive",
-            label: "AGRESYWNY",
+            label: "ALTERNATYWNY",
             icon: "⚡",
-            description: "Atakuje główne ogniska. Większość kuponu może siedzieć w 1–2 najmocniejszych dziesiątkach.",
-            structure: concentrateStructure(baseStructure, sectorScores, targetCount, "aggressive")
+            fallbackDescription: "Trzecia wysoko sklasyfikowana struktura, używana jako zapasowy wariant."
         }
     ];
 
-    // Jeżeli dwa warianty przypadkiem wyszły identyczne, dokładamy jeszcze jedno
-    // przesunięcie dla agresywnego, żeby użytkownik faktycznie dostał wybór.
-    if (profiles[2].structure.join("-") === profiles[1].structure.join("-")) {
-        profiles[2].structure = concentrateStructure(
-            profiles[1].structure,
-            sectorScores,
-            targetCount,
-            "aggressive"
-        );
-    }
+    const observed = [];
+    const seenTargetStructures = new Set();
+
+    activityRanking.forEach(item => {
+        const targetStructure = Array.isArray(item.targetStructure)
+            ? [...item.targetStructure]
+            : [];
+        if (!targetStructure.length) return;
+        const key = targetStructure.join("-");
+        if (seenTargetStructures.has(key)) return;
+        seenTargetStructures.add(key);
+        observed.push({ ...item, targetStructure });
+    });
+
+    const fallbackStructures = [
+        [...baseStructure],
+        concentrateStructure(baseStructure, sectorScores, targetCount, "hot"),
+        concentrateStructure(baseStructure, sectorScores, targetCount, "aggressive")
+    ];
+
+    const profiles = labels.map((meta, index) => {
+        const activity = observed[index] || null;
+        const structure = activity?.targetStructure || fallbackStructures[index];
+        const rawStructureText = activity?.key || structure.join("-");
+        const scaledText = structure.join("-");
+        const scaleNote = rawStructureText !== scaledText
+            ? ` • przeskalowano do ${targetCount} typów: ${scaledText}`
+            : "";
+        const description = activity
+            ? `${meta.fallbackDescription} Wystąpienia ${activity.count}/${activity.windowSize} (${Math.round(activity.rate * 100)}%) • trend ${activity.trend.directionText}${activity.trend.currentStreak >= 2 ? ` • seria ${activity.trend.currentStreak}` : ""}${scaleNote}.`
+            : `${meta.fallbackDescription} Brak trzeciej unikalnej struktury w danych — użyto awaryjnego szkicu sektorowego.`;
+
+        return {
+            ...meta,
+            description,
+            structure: [...structure],
+            sourceStructure: rawStructureText,
+            activity
+        };
+    });
 
     return profiles.map(profile => ({
         ...profile,
@@ -2435,10 +2670,44 @@ function buildAutoForgeAnalysis() {
     }
     rankedNumbers.sort((a, b) => b.score - a.score || a.number - b.number);
 
+    const sectorModelStructure = [...structure];
+    const structureActivityRanking = buildObservedStructureRanking(
+        draws,
+        requestedWindows,
+        weights,
+        sectorScores,
+        targetCount
+    );
+
+    // Główna zasada po audycie 07.09.2026:
+    // AUTO FORGE nie wymyśla struktury ponad dane. Najpierw wybiera lidera
+    // rzeczywiście obserwowanych struktur, a sektorowy model służy jako tie-breaker
+    // i awaryjne tło. Dla systemów / Multi struktura jest proporcjonalnie skalowana.
+    if (structureActivityRanking.length) {
+        const leaderStructure = structureActivityRanking[0].targetStructure;
+        structure.splice(0, structure.length, ...leaderStructure);
+    }
+
+    activeSectors.forEach(sector => {
+        sector.suggested = structure[sector.index] || 0;
+    });
+
+    // Po wyborze realnego lidera aktualizujemy również banner koncentracji,
+    // żeby raport nie pokazywał starego sektorowego szkicu obok nowej struktury.
+    const selectedBandAllocation = getStructureBandAllocation(structure);
+    const selectedFocusTargetCount = selectedBandAllocation
+        .filter(item => focusKeys.includes(item.key))
+        .reduce((sum, item) => sum + item.count, 0);
+    const selectedFocusPercent = targetCount
+        ? Math.round((selectedFocusTargetCount / targetCount) * 100)
+        : 0;
+    const selectedOutsideTargetCount = targetCount - selectedFocusTargetCount;
+
     const structureProfiles = buildAutoForgeStructureProfiles(
         structure,
         sectorScores,
-        targetCount
+        targetCount,
+        structureActivityRanking
     );
 
     const activeNumberSet = new Set();
@@ -2530,11 +2799,13 @@ function buildAutoForgeAnalysis() {
         focusZone: focusKeys.join("/"),
         focusRawShare,
         focusIntensity,
-        focusPercent,
-        focusTargetCount,
-        outsideTargetCount,
+        focusPercent: selectedFocusPercent,
+        focusTargetCount: selectedFocusTargetCount,
+        outsideTargetCount: selectedOutsideTargetCount,
         signalStrength,
         structure,
+        sectorModelStructure,
+        structureActivityRanking,
         structureProfiles,
         activeSectors,
         suggestedEven,
@@ -3217,9 +3488,11 @@ function renderAutoForgeGenerationResult(analysis, plan, numbers) {
 }
 
 function generateAutoForgeFromAnalysis(analysis, profileKey = "profile") {
-    const profile = (analysis.structureProfiles || []).find(item => item.key === profileKey)
-        || (analysis.structureProfiles || [])[0]
-        || { key: "profile", label: "PROFILOWY", icon: "🧭", structure: analysis.structure };
+    const profile = profileKey && typeof profileKey === "object"
+        ? profileKey
+        : (analysis.structureProfiles || []).find(item => item.key === profileKey)
+            || (analysis.structureProfiles || [])[0]
+            || { key: "profile", label: "PROFILOWY", icon: "🧭", structure: analysis.structure };
 
     applyAutoForgeProfileToControls(analysis, profile.structure);
 
@@ -3327,6 +3600,33 @@ function renderAutoForgeReport(analysis) {
         .map(item => `${item.number} (${item.score}/100 • ${item.sector})`)
         .join(" • ") || "brak kandydata ≥ 55/100 — slot przejdzie na MID";
 
+
+    const structureLeader = (analysis.structureActivityRanking || [])[0] || null;
+    const structureRankingRows = (analysis.structureActivityRanking || []).slice(0, 5).map((item, index) => {
+        const lastSeen = item.trend.drawsAgo === 0
+            ? "ostatnie losowanie"
+            : item.trend.drawsAgo === null
+                ? "—"
+                : `${item.trend.drawsAgo} los. temu`;
+        return `
+            <tr class="${index === 0 ? "structure-leader-row" : ""}">
+                <td><strong>#${index + 1}</strong></td>
+                <td><strong>${item.key}</strong></td>
+                <td>${item.count}/${item.windowSize}</td>
+                <td>${Math.round(item.rate * 100)}%</td>
+                <td><strong class="structure-trend-${item.trend.direction > 0 ? "up" : item.trend.direction < 0 ? "down" : "flat"}">${item.trend.directionText}</strong></td>
+                <td>${lastSeen}</td>
+                <td>${item.trend.maxStreak || "—"}</td>
+            </tr>
+        `;
+    }).join("");
+
+    const manualStructureOptions = (analysis.structureActivityRanking || []).slice(0, 10).map((item, index) => {
+        const scaled = item.targetStructure.join("-");
+        const scaleLabel = scaled !== item.key ? ` → ${scaled}` : "";
+        return `<option value="${item.key}" ${index === 0 ? "selected" : ""}>#${index + 1} ${item.key}${scaleLabel} • ${item.count}/${item.windowSize} • ${item.trend.directionShort}</option>`;
+    }).join("");
+
     report.innerHTML = `
         <div class="auto-forge-card auto-forge-diagnostic">
             <div class="auto-forge-title">
@@ -3361,7 +3661,7 @@ function renderAutoForgeReport(analysis) {
             <div class="auto-forge-grid">
                 <div><span>Horyzont AUTO</span><strong>${analysis.modeLabel}</strong><small>realnie użyto: ${analysis.windowsUsed}</small></div>
                 <div><span>Dominująca strefa</span><strong>${analysis.dominantBand.key} • aktywność ×${analysis.dominantBand.intensity.toFixed(2)}</strong></div>
-                <div><span>Sugerowana struktura</span><strong>${analysis.structure.join("-")}</strong></div>
+                <div><span>Sugerowana struktura</span><strong>${analysis.structure.join("-")}</strong><small>${structureLeader ? `lider danych ${structureLeader.count}/${structureLeader.windowSize} • ${structureLeader.trend.directionText}` : "awaryjny model sektorowy"}</small></div>
                 <div><span>Parzystość aktywnej strefy</span><strong>${analysis.suggestedEven}/${analysis.suggestedOdd} • ${Math.round(analysis.focusEvenShare * 100)}% parzystych</strong></div>
                 <div><span>Skupisko</span><strong>próg ${analysis.thresholds.cluster}+ • mocne ${analysis.thresholds.strong}+</strong></div>
                 <div><span>🎚️ Plan temperatury</span><strong>${getAutoForgeTemperatureBudgetText(analysis.temperatureBudget)}</strong><small>około 45% / 35% / 20%</small></div>
@@ -3432,13 +3732,51 @@ function renderAutoForgeReport(analysis) {
                 </small>
             </div>
 
+            <div class="auto-forge-section auto-forge-structure-ranking-section">
+                <h4>🏆 Aktywne struktury — ranking AUTO</h4>
+                <div class="auto-forge-table-wrap">
+                    <table class="auto-forge-sector-table auto-forge-structure-ranking-table">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Struktura</th>
+                                <th>Wyst.</th>
+                                <th>Udział</th>
+                                <th>Trend</th>
+                                <th>Ostatnio</th>
+                                <th>Max seria</th>
+                            </tr>
+                        </thead>
+                        <tbody>${structureRankingRows || `<tr><td colspan="7">Brak danych o strukturach.</td></tr>`}</tbody>
+                    </table>
+                </div>
+                <small class="auto-forge-pattern-note">
+                    Częstotliwość ma pierwszy priorytet. Świeżość, seria, trend i zgodność z aktywnymi sektorami rozstrzygają remis lub bardzo podobne układy.
+                </small>
+            </div>
+
+            <div class="auto-forge-section auto-forge-manual-structure-section">
+                <h4>✋ Awaryjny ręczny wybór struktury</h4>
+                <div class="auto-forge-manual-structure-control">
+                    <select id="autoForgeManualStructureSelect" ${manualStructureOptions ? "" : "disabled"}>
+                        ${manualStructureOptions || `<option>Brak struktur do wyboru</option>`}
+                    </select>
+                    <button type="button" id="autoForgeManualStructureBtn" class="primary-btn" ${manualStructureOptions ? "" : "disabled"}>
+                        Generuj z wybraną strukturą
+                    </button>
+                </div>
+                <small class="auto-forge-pattern-note">
+                    Ręczny wybór jest twardym ograniczeniem struktury. AUTO nadal dobiera liczby wewnątrz wybranych sektorów według pozostałych wag i filtrów.
+                </small>
+            </div>
+
             <div class="auto-forge-section">
                 <h4>🧩 Ostatnie struktury — kontrola wzorca</h4>
                 <div class="auto-forge-recent-list">${recentRows}</div>
             </div>
 
             <div class="auto-forge-section auto-forge-profile-section">
-                <h4>🎯 Wybierz sposób ataku sektorów</h4>
+                <h4>🎯 Główna struktura + 2 gorące alternatywy</h4>
                 <div class="auto-forge-profile-grid">
                     ${(analysis.structureProfiles || []).map(profile => {
                         const bandText = profile.bandAllocation
@@ -3460,14 +3798,14 @@ function renderAutoForgeReport(analysis) {
                     }).join("")}
                 </div>
                 <small class="auto-forge-pattern-note">
-                    Najpierw AUTO FORGE dzieli budżet liczb między LOW / MID / HIGH i konkretne sektory. Dopiero potem wypełnia je kontrolowanym miksem HOT / MID / COLD+. Zera w słabych sektorach są dozwolone.
+                    Profilowy bierze lidera realnych wystąpień. Dwa pozostałe warianty pochodzą z kolejnych wysoko sklasyfikowanych struktur. Sektory i migracja są teraz tie-breakerem, a nie fabryką nowej struktury.
                 </small>
             </div>
 
             <div class="auto-forge-next-step">
                 <div>
                     <span>ETAP 4 — SILNIK WYBORU LICZB AKTYWNY</span>
-                    <strong>Masz teraz 3 warianty struktury: profilowy, gorący i agresywny.</strong>
+                    <strong>Masz teraz lidera danych oraz 2 gorące struktury zamienne.</strong>
                     <small>Strefa → sektor/skupisko → budżet HOT/MID/COLD+ → powroty/relacje → parzystość → ważone RNG.</small>
                 </div>
                 <button id="autoForgeGenerateFromProfileBtn" class="primary-btn auto-forge-generate-profile-btn">
@@ -3494,6 +3832,27 @@ function renderAutoForgeReport(analysis) {
     if (generateFromProfileBtn) {
         generateFromProfileBtn.addEventListener("click", () => {
             generateAutoForgeFromAnalysis(analysis, "profile");
+        });
+    }
+
+    const manualStructureSelect = document.getElementById("autoForgeManualStructureSelect");
+    const manualStructureBtn = document.getElementById("autoForgeManualStructureBtn");
+
+    if (manualStructureSelect && manualStructureBtn) {
+        manualStructureBtn.addEventListener("click", () => {
+            const selected = (analysis.structureActivityRanking || [])
+                .find(item => item.key === manualStructureSelect.value);
+            if (!selected) return;
+
+            autoForgeManualStructureOverride = selected.key;
+            generateAutoForgeFromAnalysis(analysis, {
+                key: "manual",
+                label: `RĘCZNY ${selected.key}`,
+                icon: "✋",
+                structure: [...selected.targetStructure],
+                sourceStructure: selected.key,
+                activity: selected
+            });
         });
     }
 }
@@ -4673,6 +5032,109 @@ function buildStatsSectorMigration(draws, maxDraws = 5) {
 }
 
 
+function renderStatsStructureTrendChart(draws, ranking) {
+    const sample = (Array.isArray(draws) ? draws : [])
+        .filter(draw => getValidDrawNumbers(draw).length > 0);
+    const top = (Array.isArray(ranking) ? ranking : []).slice(0, 5);
+
+    if (sample.length < 2 || !top.length) {
+        return `
+            <div class="statsBox stats-structure-chart-box">
+                <h3>📈 TREND TOP 5 STRUKTUR</h3>
+                <div class="stats-migration-empty">Za mało danych do wykresu struktur.</div>
+            </div>
+        `;
+    }
+
+    const rollingSize = Math.min(10, Math.max(2, Math.round(sample.length / 4)));
+    const width = 920;
+    const height = 310;
+    const left = 56;
+    const right = 24;
+    const topPad = 22;
+    const bottom = 54;
+    const plotWidth = width - left - right;
+    const plotHeight = height - topPad - bottom;
+
+    const series = top.map((item, seriesIndex) => {
+        const values = sample.map((_, index) => {
+            const start = Math.max(0, index - rollingSize + 1);
+            const windowDraws = sample.slice(start, index + 1);
+            const count = windowDraws.filter(
+                draw => getStructureForNumbers(draw.liczby || []) === item.key
+            ).length;
+            return windowDraws.length ? (count / windowDraws.length) * 100 : 0;
+        });
+        return { item, values, seriesIndex };
+    });
+
+    const maxValue = Math.max(1, ...series.flatMap(entry => entry.values));
+    const yMax = Math.min(100, Math.max(25, Math.ceil(maxValue / 10) * 10));
+    const xFor = index => sample.length === 1
+        ? left + plotWidth / 2
+        : left + (index / (sample.length - 1)) * plotWidth;
+    const yFor = value => topPad + ((yMax - clamp(value, 0, yMax)) / yMax) * plotHeight;
+
+    const yTicks = [0, 0.25, 0.5, 0.75, 1].map(part => Math.round(yMax * part));
+    const yGrid = yTicks.map(value => {
+        const y = yFor(value);
+        return `
+            <line class="stats-structure-grid" x1="${left}" y1="${y.toFixed(1)}" x2="${width - right}" y2="${y.toFixed(1)}" />
+            <text class="stats-structure-axis-label" x="${left - 10}" y="${(y + 4).toFixed(1)}" text-anchor="end">${value}%</text>
+        `;
+    }).join("");
+
+    const labelStep = Math.max(1, Math.ceil(sample.length / 8));
+    const xLabels = sample.map((draw, index) => {
+        const show = index === 0 || index === sample.length - 1 || index % labelStep === 0;
+        if (!show) return "";
+        const shortDate = String(draw.data || "—").replace(/\.\d{4}$/, "");
+        return `<text class="stats-structure-axis-label stats-structure-date-label" x="${xFor(index).toFixed(1)}" y="${height - 18}" text-anchor="middle">${shortDate}</text>`;
+    }).join("");
+
+    const lines = series.map(entry => {
+        const points = entry.values
+            .map((value, index) => `${xFor(index).toFixed(1)},${yFor(value).toFixed(1)}`)
+            .join(" ");
+        const lastValue = entry.values[entry.values.length - 1] || 0;
+        return `
+            <polyline class="stats-structure-series stats-structure-series-${entry.seriesIndex + 1}" points="${points}" />
+            <circle class="stats-structure-last-dot stats-structure-dot-${entry.seriesIndex + 1}" cx="${xFor(sample.length - 1).toFixed(1)}" cy="${yFor(lastValue).toFixed(1)}" r="3.2">
+                <title>${entry.item.key}: ${lastValue.toFixed(0)}% w ostatnim oknie kroczącym</title>
+            </circle>
+        `;
+    }).join("");
+
+    const legend = series.map(entry => `
+        <span><i class="stats-structure-legend-dot stats-structure-dot-${entry.seriesIndex + 1}"></i>#${entry.seriesIndex + 1} ${entry.item.key} • ${entry.item.trend.directionShort}</span>
+    `).join("");
+
+    return `
+        <div class="statsBox stats-structure-chart-box">
+            <h3>📈 TREND TOP 5 STRUKTUR</h3>
+            <div class="stats-structure-chart-summary">
+                <span>Okno analizy: <strong>${sample.length}</strong></span>
+                <span>Momentum: <strong>okno kroczące ${rollingSize} los.</strong></span>
+                <span>Lider: <strong>${top[0].key}</strong></span>
+                <span>Trend lidera: <strong class="structure-trend-${top[0].trend.direction > 0 ? "up" : top[0].trend.direction < 0 ? "down" : "flat"}">${top[0].trend.directionText}</strong></span>
+            </div>
+            <div class="stats-structure-svg-wrap">
+                <svg class="stats-structure-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Trend aktywności pięciu najczęstszych struktur">
+                    ${yGrid}
+                    <line class="stats-structure-axis" x1="${left}" y1="${topPad}" x2="${left}" y2="${height - bottom}" />
+                    <line class="stats-structure-axis" x1="${left}" y1="${height - bottom}" x2="${width - right}" y2="${height - bottom}" />
+                    ${lines}
+                    ${xLabels}
+                </svg>
+            </div>
+            <div class="stats-structure-legend">${legend}</div>
+            <p class="stats-migration-note">
+                Linia pokazuje udział danej struktury w krótkim oknie kroczącym. Wzrost linii oznacza, że struktura pojawia się częściej w świeższej części wybranego zakresu; spadek oznacza wygaszanie aktywności.
+            </p>
+        </div>
+    `;
+}
+
 function renderStatsMigrationChart(draws) {
     const sample = (Array.isArray(draws) ? draws : [])
         .filter(draw => getValidDrawNumbers(draw).length > 0);
@@ -5389,26 +5851,17 @@ function pokazStatystyki() {
     }
 
     const analizowaneLosowania = getAnalysisDraws();
-const struktury = {};
-
-analizowaneLosowania.forEach(losowanie => {
-
-    const struktura =
-        getStructureForNumbers(losowanie.liczby);
-
-    if (!struktury[struktura]) {
-        struktury[struktura] = 0;
-    }
-
-    struktury[struktura]++;
-});
-const rankingStruktur =
-    Object.entries(struktury)
-        .map(([struktura, wystapienia]) => ({
-            struktura,
-            wystapienia
-        }))
-        .sort((a, b) => b.wystapienia - a.wystapienia);
+const rankingStruktur = buildObservedStructureRanking(
+    analizowaneLosowania,
+    [Math.max(1, analizowaneLosowania.length)],
+    [1],
+    [],
+    getHistoricalDrawCount()
+).map(item => ({
+    ...item,
+    struktura: item.key,
+    wystapienia: item.count
+}));
 analizowaneLosowania.forEach(losowanie => {
     losowanie.liczby.forEach(nr => {
         statystyki[nr]++;
@@ -5778,17 +6231,60 @@ ${renderStatsPulsePanel(shortPulse, clusterContinuity, sectorMigration)}
         </div>
     `}
 </div>
-<div class="statsBox">
-    <h3>🧩 TOP STRUKTURY</h3>
-
-    ${rankingStruktur.slice(0, 5).map(item => `
+<div class="statsBox stats-structure-leaders-box">
+    <div class="stats-structure-leaders-head">
         <div>
-            <span>${item.struktura}</span>
-            <strong>${item.wystapienia}</strong>
+            <h3>🧩 TOP 5 STRUKTUR</h3>
+            <p>Ranking aktywności dla ostatnich ${analizowaneLosowania.length} losowań. Lider ma pierwszeństwo w AUTO FORGE.</p>
         </div>
-    `).join("")}
-    
+        ${rankingStruktur[0] ? `
+            <div class="stats-structure-leader-badge">
+                <span>AKTUALNY LIDER</span>
+                <strong>${rankingStruktur[0].struktura}</strong>
+            </div>
+        ` : ""}
+    </div>
+
+    <div class="stats-structure-ranking-list">
+        ${rankingStruktur.slice(0, 5).map((item, index) => {
+            const lastSeen = item.trend.drawsAgo === 0
+                ? "teraz"
+                : item.trend.drawsAgo === null
+                    ? "—"
+                    : `${item.trend.drawsAgo} los. temu`;
+            const trendClass = item.trend.direction > 0 ? "up" : item.trend.direction < 0 ? "down" : "flat";
+            return `
+                <article class="stats-structure-ranking-row ${index === 0 ? "leader" : ""}">
+                    <div class="stats-structure-rank-top">
+                        <span class="stats-structure-rank-number">#${index + 1}</span>
+                        <strong class="stats-structure-code">${item.struktura}</strong>
+                        <em class="stats-structure-trend-pill structure-trend-${trendClass}">${item.trend.directionText}</em>
+                    </div>
+
+                    <div class="stats-structure-rank-metrics">
+                        <div>
+                            <span>Wystąpienia</span>
+                            <strong>${item.wystapienia}/${item.windowSize}</strong>
+                        </div>
+                        <div>
+                            <span>Udział</span>
+                            <strong>${Math.round(item.rate * 100)}%</strong>
+                        </div>
+                        <div>
+                            <span>Ostatnio</span>
+                            <strong>${lastSeen}</strong>
+                        </div>
+                        <div>
+                            <span>Max seria</span>
+                            <strong>${item.trend.maxStreak || 1}</strong>
+                        </div>
+                    </div>
+                </article>
+            `;
+        }).join("")}
+    </div>
 </div>
+${renderStatsStructureTrendChart(analizowaneLosowania, rankingStruktur)}
 <div class="statsBox">
     <h3>⚖️ TOP PARZYSTOŚĆ</h3>
 
