@@ -1,59 +1,99 @@
-<!DOCTYPE html>
-<html lang="pl">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LottoForge — Analysis & Generator</title>
+(() => {
+  "use strict";
 
-    <link rel="stylesheet" href="style.css">
-    <meta name="theme-color" content="#080b12">
-</head>
+  const GAME_IDS = ["miniBtn", "lottoBtn", "euroBtn", "multiBtn", "extraBtn"];
+  let lastGameId = localStorage.getItem("lottoForgeMobile.lastGame") || "miniBtn";
+  let deferredInstallPrompt = null;
 
-<body>
+  const clickById = id => document.getElementById(id)?.click();
 
-  <div class="app">
+  function setActiveGame(id) {
+    if (!GAME_IDS.includes(id)) return;
+    lastGameId = id;
+    localStorage.setItem("lottoForgeMobile.lastGame", id);
+    document.querySelectorAll(".mobile-game-btn").forEach(btn => {
+      btn.classList.toggle("active", btn.dataset.target === id);
+    });
+    setActiveNav("generator");
+  }
 
-    <aside class="sidebar">
+  function setActiveNav(name) {
+    document.querySelectorAll(".mobile-nav-btn").forEach(btn => {
+      btn.classList.toggle("active", btn.dataset.nav === name);
+    });
+  }
 
-        <h2>🎲 LottoForge</h2>
+  GAME_IDS.forEach(id => {
+    document.getElementById(id)?.addEventListener("click", () => setActiveGame(id));
+  });
 
-       
+  document.querySelectorAll(".mobile-game-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const id = btn.dataset.target;
+      setActiveGame(id);
+      clickById(id);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    });
+  });
 
-<button id="miniBtn">Mini Lotto</button>
-<button id="lottoBtn">Lotto</button>
-<button id="euroBtn">EuroJackpot</button>
-<button id="multiBtn">Multi Multi</button>
-<button id="extraBtn">Extra Pensja</button>
+  document.querySelectorAll(".mobile-nav-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const nav = btn.dataset.nav;
+      if (nav === "generator") clickById(lastGameId);
+      if (nav === "stats") clickById("statsBtn");
+      if (nav === "lab") clickById("labBtn");
+      if (nav === "import") clickById("importBtn");
+      if (nav !== "import") {
+        setActiveNav(nav);
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }
+    });
+  });
 
-<hr>
+  document.getElementById("statsBtn")?.addEventListener("click", () => setActiveNav("stats"));
+  document.getElementById("labBtn")?.addEventListener("click", () => setActiveNav("lab"));
 
-<button>Historia</button>
-<button id="statsBtn">Statystyki</button>
-<button id="labBtn">🧪 Laboratorium</button>
-<button id="importBtn">📥 Import danych</button>
-<button>Ustawienia</button>
+  window.addEventListener("beforeinstallprompt", event => {
+    event.preventDefault();
+    deferredInstallPrompt = event;
+    document.querySelectorAll("[data-install-app]").forEach(btn => {
+      btn.hidden = false;
+      btn.classList.add("ready");
+    });
+  });
 
-    </aside>
+  async function requestInstall() {
+    if (!deferredInstallPrompt) {
+      alert("Jeśli nie widzisz automatycznej instalacji: w Chrome wybierz menu ⋮ → Dodaj do ekranu głównego / Zainstaluj aplikację.");
+      return;
+    }
+    deferredInstallPrompt.prompt();
+    await deferredInstallPrompt.userChoice;
+    deferredInstallPrompt = null;
+    document.querySelectorAll("[data-install-app]").forEach(btn => {
+      btn.classList.remove("ready");
+      btn.hidden = true;
+    });
+  }
 
-    <main class="content">
+  document.querySelectorAll("[data-install-app]").forEach(btn => btn.addEventListener("click", requestInstall));
 
-    <div id="contentArea">
+  window.addEventListener("appinstalled", () => {
+    deferredInstallPrompt = null;
+    document.querySelectorAll("[data-install-app]").forEach(btn => {
+      btn.classList.remove("ready");
+      btn.hidden = true;
+    });
+  });
 
-        <h1>Witaj w LottoForge</h1>
+  if ("serviceWorker" in navigator && location.protocol !== "file:") {
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("./sw.js").catch(error => {
+        console.warn("LottoForge SW:", error);
+      });
+    });
+  }
 
-        <p>Wybierz moduł z menu po lewej stronie.</p>
-
-    </div>
-
-</main>
-
-</div>
-<input
-    type="file"
-    id="csvFile"
-    accept=".csv"
-    style="display:none">
-<script src="script.js"></script>
-
-</body>
-</html>
+  setActiveGame(lastGameId);
+  setActiveNav("generator");
+})();

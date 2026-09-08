@@ -1,0 +1,72 @@
+/* LottoForge Mobile PWA — warstwa mobilna. Oryginalny desktop pozostaje bez zmian. */
+:root{--lf-safe-top:env(safe-area-inset-top,0px);--lf-safe-bottom:env(safe-area-inset-bottom,0px)}
+.mobile-topbar,.mobile-game-strip,.mobile-bottom-nav{display:none}
+.install-app-btn{margin-top:auto!important;background:linear-gradient(135deg,#1c7ed6,#7c5cff)!important;color:#fff!important}
+.install-app-btn[hidden]{display:none!important}
+
+@media(max-width:900px){
+  html,body{min-height:100%;overscroll-behavior-y:none}
+  body{padding:0!important;-webkit-tap-highlight-color:transparent}
+  .app{display:block!important;height:auto!important;min-height:100dvh!important}
+  .sidebar{display:none!important}
+  .content{display:block!important;width:100%!important;min-width:0!important;padding:0 12px calc(92px + var(--lf-safe-bottom))!important;margin:0!important;overflow:visible!important}
+  #contentArea{display:block!important;width:100%!important;min-width:0!important;padding:16px 0 28px!important}
+  #contentArea.stats-view,#contentArea.lab-view{display:block!important}
+  .main-panel,.side-panel{width:100%!important;max-width:none!important;margin:0!important;min-width:0!important}
+  .side-panel{margin-top:18px!important;padding-top:16px!important;border-top:1px solid rgba(124,92,255,.18)}
+  .content h1{font-size:clamp(27px,8vw,36px)!important;line-height:1.08}
+  .content h2{font-size:20px}
+  .content p{font-size:14px!important}
+  .ball-container{gap:8px!important;padding:12px 8px!important;flex-wrap:wrap!important}
+  .ball,.number-ball{width:46px!important;height:46px!important;margin:2px!important;font-size:14px!important}
+  .stats-card,.statsTable,.ticket-batch-summary{max-width:100%!important;width:100%!important}
+  .auto-forge-report,.latest-draw-status{max-width:100%!important}
+  .auto-forge-card{padding:15px!important}
+  .auto-forge-sector-table{min-width:650px}
+  input,select,textarea,button{font-size:16px}
+  button,.primary-btn{min-height:44px}
+
+  .mobile-topbar{
+    position:sticky;top:0;z-index:1000;display:flex;align-items:center;justify-content:space-between;gap:10px;
+    margin:0 -12px;padding:calc(8px + var(--lf-safe-top)) 14px 9px;
+    background:rgba(8,11,18,.94);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
+    border-bottom:1px solid rgba(124,92,255,.18);box-shadow:0 8px 24px rgba(0,0,0,.18)
+  }
+  .mobile-brand{display:flex;align-items:center;gap:9px;min-width:0}
+  .mobile-brand-mark{width:34px;height:34px;display:grid;place-items:center;border-radius:10px;background:linear-gradient(135deg,#6d54eb,#318fe9);box-shadow:0 8px 20px rgba(93,75,229,.28);font-size:18px}
+  .mobile-brand-copy{display:flex;flex-direction:column;min-width:0}
+  .mobile-brand-copy strong{font-size:15px;color:#f6f8ff;letter-spacing:-.01em}
+  .mobile-brand-copy small{font-size:9px;color:#8190a6;text-transform:uppercase;letter-spacing:.09em;font-weight:800}
+  .mobile-install-btn{display:none;min-height:36px!important;padding:7px 10px!important;border-radius:10px!important;background:rgba(124,92,255,.12)!important;border:1px solid rgba(124,92,255,.28)!important;color:#d6d0ff!important;font-size:11px!important;font-weight:850!important}
+  .mobile-install-btn.ready{display:inline-flex;align-items:center}
+
+  .mobile-game-strip{display:flex;position:sticky;top:calc(52px + var(--lf-safe-top));z-index:990;gap:7px;overflow-x:auto;margin:0 -12px;padding:9px 12px;background:linear-gradient(180deg,rgba(8,11,18,.98),rgba(8,11,18,.90));border-bottom:1px solid rgba(92,108,137,.12);scrollbar-width:none}
+  .mobile-game-strip::-webkit-scrollbar{display:none}
+  .mobile-game-btn{flex:0 0 auto;min-height:34px!important;padding:7px 10px!important;border-radius:999px!important;background:#101725!important;border:1px solid #26344c!important;color:#99a8bd!important;font-size:11px!important;font-weight:800!important;box-shadow:none!important}
+  .mobile-game-btn.active{background:rgba(124,92,255,.16)!important;border-color:rgba(124,92,255,.48)!important;color:#e5e0ff!important}
+
+  .mobile-bottom-nav{position:fixed;z-index:1200;left:8px;right:8px;bottom:calc(7px + var(--lf-safe-bottom));display:grid;grid-template-columns:repeat(4,1fr);gap:5px;padding:6px;border-radius:18px;background:rgba(11,15,24,.94);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);border:1px solid rgba(104,122,153,.20);box-shadow:0 16px 44px rgba(0,0,0,.38)}
+  .mobile-nav-btn{min-width:0!important;min-height:52px!important;padding:5px 3px!important;display:flex!important;flex-direction:column;align-items:center;justify-content:center;gap:2px;border-radius:13px!important;background:transparent!important;border:1px solid transparent!important;color:#8290a5!important;box-shadow:none!important;font-size:10px!important;font-weight:800!important}
+  .mobile-nav-btn .ico{font-size:19px;line-height:1}
+  .mobile-nav-btn.active{background:rgba(124,92,255,.10)!important;border-color:rgba(124,92,255,.20)!important;color:#d9d3ff!important}
+  .mobile-nav-btn:active{transform:scale(.97)!important}
+
+  .lab-create-panel,.lab-section{padding:15px!important}
+  .stats-view .statsSummary{grid-template-columns:1fr!important}
+  .stats-view .statsBox{max-width:none!important}
+  .ticket-quick-copy-panel{padding:13px!important}
+}
+
+@media(max-width:430px){
+  .content{padding-left:9px!important;padding-right:9px!important}
+  .mobile-topbar,.mobile-game-strip{margin-left:-9px;margin-right:-9px}
+  .mobile-topbar{padding-left:11px;padding-right:11px}
+  .mobile-game-strip{padding-left:9px;padding-right:9px}
+  .ball,.number-ball{width:42px!important;height:42px!important;font-size:13px!important}
+  .auto-forge-decision-banner{grid-template-columns:1fr!important}
+  .ticket-batch-balls .ball{width:35px!important;height:35px!important;font-size:12px!important}
+}
+
+@media(display-mode:standalone){
+  .mobile-brand-copy small{color:#7ce6aa}
+}
