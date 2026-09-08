@@ -376,6 +376,37 @@ statsBtn.addEventListener("click", () => {
 labBtn.addEventListener("click", () => {
     showLaboratory(getCurrentGameKey());
 });
+
+// =========================================================
+// LOTTOFORGE MOBILE BRIDGE
+// Mobilna nawigacja wywołuje logikę aplikacji bez klikania
+// ukrytych przycisków desktopowych. Zostawiamy desktop bez zmian.
+// =========================================================
+window.LottoForgeMobileBridge = {
+    openGame(gameKey) {
+        if (!games[gameKey]) return false;
+        currentGame = games[gameKey];
+        showGame();
+        return true;
+    },
+    openStats() {
+        pokazStatystyki();
+        return true;
+    },
+    openLab() {
+        showLaboratory(getCurrentGameKey());
+        return true;
+    },
+    openImport() {
+        if (!csvFile) return false;
+        csvFile.value = "";
+        csvFile.click();
+        return true;
+    },
+    getCurrentGameKey() {
+        return getCurrentGameKey();
+    }
+};
 function detectCsvDelimiter(line) {
     const candidates = [";", "\t", ","];
     return candidates

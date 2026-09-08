@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>LottoForge — Analysis & Generator</title>
 
-    <link rel="stylesheet" href="style.css">
-    <link rel="stylesheet" href="mobile.css">
+    <link rel="stylesheet" href="style.css?v=20260908-interaction-v3">
+    <link rel="stylesheet" href="mobile.css?v=20260908-interaction-v3">
     <link rel="manifest" href="manifest.webmanifest">
     <link rel="apple-touch-icon" href="apple-touch-icon.png">
     <meta name="theme-color" content="#080b12">
@@ -26,20 +26,20 @@
 
        
 
-<button id="miniBtn">Mini Lotto</button>
-<button id="lottoBtn">Lotto</button>
-<button id="euroBtn">EuroJackpot</button>
-<button id="multiBtn">Multi Multi</button>
-<button id="extraBtn">Extra Pensja</button>
+<button type="button" id="miniBtn">Mini Lotto</button>
+<button type="button" id="lottoBtn">Lotto</button>
+<button type="button" id="euroBtn">EuroJackpot</button>
+<button type="button" id="multiBtn">Multi Multi</button>
+<button type="button" id="extraBtn">Extra Pensja</button>
 
 <hr>
 
-<button>Historia</button>
-<button id="statsBtn">Statystyki</button>
-<button id="labBtn">🧪 Laboratorium</button>
-<button id="importBtn">📥 Import danych</button>
-<button>Ustawienia</button>
-<button class="install-app-btn" data-install-app hidden>📲 Zainstaluj aplikację</button>
+<button type="button">Historia</button>
+<button type="button" id="statsBtn">Statystyki</button>
+<button type="button" id="labBtn">🧪 Laboratorium</button>
+<button type="button" id="importBtn">📥 Import danych</button>
+<button type="button">Ustawienia</button>
+<button type="button" class="install-app-btn" data-install-app hidden>📲 Zainstaluj aplikację</button>
 
     </aside>
 
@@ -50,15 +50,15 @@
         <div class="mobile-brand-mark">🎲</div>
         <div class="mobile-brand-copy"><strong>LottoForge</strong><small>Mobile Lab</small></div>
       </div>
-      <button class="mobile-install-btn" data-install-app hidden>📲 Zainstaluj</button>
+      <button type="button" class="mobile-install-btn" data-install-app hidden>📲 Zainstaluj</button>
     </div>
 
     <div class="mobile-game-strip" aria-label="Wybór gry">
-      <button class="mobile-game-btn active" data-target="miniBtn">Mini</button>
-      <button class="mobile-game-btn" data-target="lottoBtn">Lotto</button>
-      <button class="mobile-game-btn" data-target="euroBtn">EuroJackpot</button>
-      <button class="mobile-game-btn" data-target="multiBtn">Multi Multi</button>
-      <button class="mobile-game-btn" data-target="extraBtn">Pensja</button>
+      <button type="button" class="mobile-game-btn active" data-target="miniBtn">Mini</button>
+      <button type="button" class="mobile-game-btn" data-target="lottoBtn">Lotto</button>
+      <button type="button" class="mobile-game-btn" data-target="euroBtn">EuroJackpot</button>
+      <button type="button" class="mobile-game-btn" data-target="multiBtn">Multi Multi</button>
+      <button type="button" class="mobile-game-btn" data-target="extraBtn">Pensja</button>
     </div>
 
     <div id="contentArea">
@@ -72,10 +72,10 @@
 </main>
 
 <nav class="mobile-bottom-nav" aria-label="Główna nawigacja">
-  <button class="mobile-nav-btn active" data-nav="generator"><span class="ico">🎲</span><span>Generator</span></button>
-  <button class="mobile-nav-btn" data-nav="stats"><span class="ico">📊</span><span>Statystyki</span></button>
-  <button class="mobile-nav-btn" data-nav="lab"><span class="ico">🧪</span><span>Lab</span></button>
-  <button class="mobile-nav-btn" data-nav="import"><span class="ico">📥</span><span>Import</span></button>
+  <button type="button" class="mobile-nav-btn active" data-nav="generator"><span class="ico">🎲</span><span>Generator</span></button>
+  <button type="button" class="mobile-nav-btn" data-nav="stats"><span class="ico">📊</span><span>Statystyki</span></button>
+  <button type="button" class="mobile-nav-btn" data-nav="lab"><span class="ico">🧪</span><span>Lab</span></button>
+  <button type="button" class="mobile-nav-btn" data-nav="import"><span class="ico">📥</span><span>Import</span></button>
 </nav>
 
 </div>
@@ -84,8 +84,8 @@
     id="csvFile"
     accept=".csv"
     style="display:none">
-<script src="script.js"></script>
-<script src="app-mobile.js"></script>
+<script src="script.js?v=20260908-interaction-v3"></script>
+<script src="app-mobile.js?v=20260908-interaction-v3"></script>
 
 </body>
 </html>

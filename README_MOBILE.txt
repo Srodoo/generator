@@ -1,31 +1,25 @@
-LOTTOFORGE MOBILE PWA — 08.09.2026
-==================================
+LottoForge Mobile PWA — INTERACTION FIX v3 (2026-09-08)
 
-Ta paczka jest gotową mobilną wersją PWA opartą na aktualnym LottoForge.
-Nie trzeba przerabiać kodu.
+CO POPRAWIONE:
+- usunięty krytyczny punkt startowy: brak dostępu do localStorage nie zatrzymuje już app-mobile.js,
+- mobilne przyciski wywołują logikę LottoForge bezpośrednio przez bridge,
+- fallback do starych przycisków desktopowych został zachowany,
+- obsługa pointerup + click dla Android / Opera / Chrome,
+- wymuszone pointer-events i touch-action dla mobilnej nawigacji,
+- uproszczone warstwy fixed/sticky pod stabilne hit-testy,
+- cache-busting CSS/JS oraz service worker v3,
+- desktop pozostaje bez zmian stylistycznych (mobile.css działa tylko <= 900 px).
 
-CO JEST W ŚRODKU
-- cały obecny Generator + AUTO FORGE
-- Statystyki
-- Laboratorium wszystkich gier
-- szybki transfer kuponów do Laboratorium
-- mobilny interfejs z dolną nawigacją
-- przełącznik gier u góry
-- instalacja PWA na ekranie telefonu
-- cache offline rdzenia aplikacji
-- dane Laboratorium nadal zapisują się lokalnie w przeglądarce/PWA
+WDROŻENIE NA GITHUB PAGES:
+1. W katalogu /generator/ PODMIEŃ wszystkie pliki z tej paczki.
+2. Zachowaj dokładne nazwy: index.html, style.css, mobile.css, script.js, app-mobile.js, sw.js itd.
+3. Po wdrożeniu na telefonie otwórz jednorazowo:
+   https://srodoo.github.io/generator/?v=20260908-interaction-v3
+   Ten parametr omija stary wpis strony w cache poprzedniego service workera.
+4. Potem normalny adres /generator/ powinien już korzystać z nowej wersji.
 
-NA TELEFONIE
-PWA wymaga uruchomienia z HTTPS. Najprościej użyć Twojego GitHub Pages:
-1. Wgraj zawartość tej paczki do repozytorium strony LottoForge (zastępując stare pliki strony).
-2. Otwórz adres LottoForge w Chrome na Androidzie.
-3. Użyj przycisku "Zainstaluj" w aplikacji albo menu Chrome → Zainstaluj aplikację / Dodaj do ekranu głównego.
-4. LottoForge uruchamia się potem z własnej ikony jak aplikacja.
-
-WAŻNE O DANYCH
-- dane Laboratorium są lokalne dla danego urządzenia/originu;
-- zainstalowana PWA na tym samym adresie GitHub Pages korzysta z tych samych danych strony;
-- nie kasuj danych witryny, jeśli nie masz kopii JSON;
-- synchronizację PC ↔ telefon możemy później dodać jako LottoForge Cloud Sync.
-
-PLIKÓW CSV nie trzeba wysyłać do serwera: aplikacja czyta je lokalnie w przeglądarce tak jak dotychczas.
+SZYBKI TEST:
+- klik Mini/Lotto/EuroJackpot/Multi Multi/Pensja,
+- klik Generator/Statystyki/Lab,
+- Import powinien otworzyć wybór pliku,
+- desktop powinien zachować dotychczasowy układ.

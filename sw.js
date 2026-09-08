@@ -1,11 +1,12 @@
-const CACHE_NAME = "lottoforge-mobile-v2-20260908";
+const VERSION = "20260908-interaction-v3";
+const CACHE_NAME = `lottoforge-mobile-${VERSION}`;
 const CORE_ASSETS = [
   "./",
   "./index.html",
-  "./style.css",
-  "./mobile.css",
-  "./script.js",
-  "./app-mobile.js",
+  `./style.css?v=${VERSION}`,
+  `./mobile.css?v=${VERSION}`,
+  `./script.js?v=${VERSION}`,
+  `./app-mobile.js?v=${VERSION}`,
   "./manifest.webmanifest",
   "./offline.html",
   "./icon-192.png",
@@ -14,19 +15,20 @@ const CORE_ASSETS = [
 ];
 
 self.addEventListener("install", event => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then(cache => cache.addAll(CORE_ASSETS))
-  );
+  event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(CORE_ASSETS)));
   self.skipWaiting();
 });
 
 self.addEventListener("activate", event => {
-  event.waitUntil(
-    caches.keys().then(keys =>
-      Promise.all(keys.filter(key => key !== CACHE_NAME).map(key => caches.delete(key)))
-    )
-  );
-  self.clients.claim();
+  event.waitUntil((async () => {
+    const keys = await caches.keys();
+    await Promise.all(keys.filter(key => key !== CACHE_NAME).map(key => caches.delete(key)));
+    await self.clients.claim();
+  })());
+});
+
+self.addEventListener("message", event => {
+  if (event.data === "SKIP_WAITING") self.skipWaiting();
 });
 
 self.addEventListener("fetch", event => {
@@ -35,41 +37,37 @@ self.addEventListener("fetch", event => {
   const request = event.request;
   const url = new URL(request.url);
   const sameOrigin = url.origin === self.location.origin;
-
-  // Dla strony i kodu najpierw sieć, aby aktualizacje z GitHub Pages
-  // były widoczne od razu zamiast utkwić w starym cache.
-  const isAppCode = request.mode === "navigate" ||
-    /\.(?:html|js|css|webmanifest)$/i.test(url.pathname);
+  const isAppCode = request.mode === "navigate" || /\.(?:html|js|css|webmanifest)$/i.test(url.pathname);
 
   if (sameOrigin && isAppCode) {
-    event.respondWith(
-      fetch(request)
-        .then(response => {
-          if (response && response.ok) {
-            const copy = response.clone();
-            caches.open(CACHE_NAME).then(cache => cache.put(request, copy));
-          }
-          return response;
-        })
-        .catch(async () => {
-          const cached = await caches.match(request);
-          return cached || (request.mode === "navigate" ? caches.match("./offline.html") : Response.error());
-        })
-    );
+    event.respondWith((async () => {
+      try {
+        const response = await fetch(request, { cache: "no-store" });
+        if (response?.ok) {
+          const cache = await caches.open(CACHE_NAME);
+          cache.put(request, response.clone()).catch(() => {});
+        }
+        return response;
+      } catch (_) {
+        return (await caches.match(request, { ignoreSearch: true })) ||
+          (request.mode === "navigate" ? await caches.match("./offline.html") : Response.error());
+      }
+    })());
     return;
   }
 
-  // Obrazy i pozostałe zasoby: cache-first.
-  event.respondWith(
-    caches.match(request).then(cached => {
-      if (cached) return cached;
-      return fetch(request).then(response => {
-        if (sameOrigin && response && response.ok) {
-          const copy = response.clone();
-          caches.open(CACHE_NAME).then(cache => cache.put(request, copy));
-        }
-        return response;
-      });
-    })
-  );
+  event.respondWith((async () => {
+    const cached = await caches.match(request);
+    if (cached) return cached;
+    try {
+      const response = await fetch(request);
+      if (sameOrigin && response?.ok) {
+        const cache = await caches.open(CACHE_NAME);
+        cache.put(request, response.clone()).catch(() => {});
+      }
+      return response;
+    } catch (_) {
+      return Response.error();
+    }
+  })());
 });

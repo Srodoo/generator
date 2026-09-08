@@ -70,3 +70,47 @@
 @media(display-mode:standalone){
   .mobile-brand-copy small{color:#7ce6aa}
 }
+
+
+/* =========================================================
+   LOTTOFORGE MOBILE — INTERACTION HARDENING v3
+   Android / Opera / Chrome / PWA
+   ========================================================= */
+@media(max-width:900px){
+  .mobile-topbar,
+  .mobile-game-strip,
+  .mobile-bottom-nav{
+    pointer-events:auto!important;
+    isolation:isolate;
+  }
+
+  .mobile-topbar{z-index:2147482000!important;}
+  .mobile-game-strip{z-index:2147481900!important;}
+  .mobile-bottom-nav{z-index:2147483000!important;}
+
+  .mobile-game-btn,
+  .mobile-nav-btn,
+  .mobile-install-btn{
+    position:relative!important;
+    z-index:2!important;
+    pointer-events:auto!important;
+    touch-action:manipulation!important;
+    -webkit-user-select:none!important;
+    user-select:none!important;
+    -webkit-tap-highlight-color:transparent!important;
+  }
+
+  .mobile-game-btn *,
+  .mobile-nav-btn *,
+  .mobile-install-btn *{
+    pointer-events:none!important;
+  }
+
+  /* Mniej warstw kompozytora = pewniejsze hit-testy na części Androidów. */
+  .mobile-topbar,
+  .mobile-bottom-nav{
+    -webkit-backdrop-filter:none!important;
+    backdrop-filter:none!important;
+    background:#0b0f18!important;
+  }
+}
