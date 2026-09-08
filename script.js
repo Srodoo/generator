@@ -313,6 +313,12 @@ function getEvenOddForNumbers(numbers) {
 
     return `${even}/${odd}`;
 }
+
+// Jawne pobranie przycisku Mini Lotto.
+// Nie polegamy na automatycznych globalach tworzonych z atrybutu id,
+// bo ich zachowanie potrafi się różnić między przeglądarką, PWA i WebView.
+const miniBtn = document.getElementById("miniBtn");
+
 miniBtn.addEventListener("click", () => {
 
     currentGame = games.mini;
