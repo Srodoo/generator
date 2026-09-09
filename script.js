@@ -46,6 +46,70 @@ const games = {
     ranges: [9,19,29,35]
 }
 };
+
+// =========================================================
+// LOTTOFORGE RNG — WEB CRYPTO API
+// =========================================================
+const LOTTOFORGE_UINT32_RANGE = 0x100000000;
+
+function getLottoForgeCrypto() {
+    const cryptoApi = globalThis.crypto;
+    if (!cryptoApi || typeof cryptoApi.getRandomValues !== "function") {
+        throw new Error("Ta przeglądarka nie udostępnia Web Crypto API (crypto.getRandomValues()).");
+    }
+    return cryptoApi;
+}
+
+function cryptoRandomUint32() {
+    const buffer = new Uint32Array(1);
+    getLottoForgeCrypto().getRandomValues(buffer);
+    return buffer[0];
+}
+
+function cryptoRandomFloat() {
+    return cryptoRandomUint32() / LOTTOFORGE_UINT32_RANGE;
+}
+
+function cryptoRandomInt(min, max) {
+    min = Math.ceil(Number(min));
+    max = Math.floor(Number(max));
+
+    if (!Number.isFinite(min) || !Number.isFinite(max) || max < min) {
+        throw new RangeError(`Niepoprawny zakres RNG: ${min}–${max}`);
+    }
+
+    const range = max - min + 1;
+    if (range <= 0 || range > LOTTOFORGE_UINT32_RANGE) {
+        throw new RangeError("Zakres RNG jest zbyt duży dla 32-bitowego generatora.");
+    }
+
+    // Rejection sampling — dzięki temu nie wprowadzamy modulo bias.
+    const limit = Math.floor(LOTTOFORGE_UINT32_RANGE / range) * range;
+    let value;
+    do {
+        value = cryptoRandomUint32();
+    } while (value >= limit);
+
+    return min + (value % range);
+}
+
+function cryptoSampleUnique(count, max) {
+    const safeCount = Math.max(0, Math.min(Math.floor(Number(count) || 0), Math.floor(Number(max) || 0)));
+    const values = Array.from({ length: max }, (_, index) => index + 1);
+
+    // Partial Fisher–Yates: losujemy tylko tyle pozycji, ile faktycznie potrzebujemy.
+    for (let i = 0; i < safeCount; i++) {
+        const j = cryptoRandomInt(i, values.length - 1);
+        [values[i], values[j]] = [values[j], values[i]];
+    }
+
+    return values.slice(0, safeCount).sort((a, b) => a - b);
+}
+
+function cryptoRandomToken() {
+    return `${cryptoRandomUint32().toString(36)}${cryptoRandomUint32().toString(36)}`;
+}
+
 function getMinPossibleSum(count) {
     let sum = 0;
 
@@ -313,12 +377,6 @@ function getEvenOddForNumbers(numbers) {
 
     return `${even}/${odd}`;
 }
-
-// Jawne pobranie przycisku Mini Lotto.
-// Nie polegamy na automatycznych globalach tworzonych z atrybutu id,
-// bo ich zachowanie potrafi się różnić między przeglądarką, PWA i WebView.
-const miniBtn = document.getElementById("miniBtn");
-
 miniBtn.addEventListener("click", () => {
 
     currentGame = games.mini;
@@ -333,6 +391,7 @@ const extraBtn = document.getElementById("extraBtn");
 const importBtn = document.getElementById("importBtn");
 const statsBtn = document.getElementById("statsBtn");
 const labBtn = document.getElementById("labBtn");
+const rngArenaBtn = document.getElementById("rngArenaBtn");
 const csvFile = document.getElementById("csvFile");
 euroBtn.addEventListener("click", () => {
 
@@ -377,36 +436,9 @@ labBtn.addEventListener("click", () => {
     showLaboratory(getCurrentGameKey());
 });
 
-// =========================================================
-// LOTTOFORGE MOBILE BRIDGE
-// Mobilna nawigacja wywołuje logikę aplikacji bez klikania
-// ukrytych przycisków desktopowych. Zostawiamy desktop bez zmian.
-// =========================================================
-window.LottoForgeMobileBridge = {
-    openGame(gameKey) {
-        if (!games[gameKey]) return false;
-        currentGame = games[gameKey];
-        showGame();
-        return true;
-    },
-    openStats() {
-        pokazStatystyki();
-        return true;
-    },
-    openLab() {
-        showLaboratory(getCurrentGameKey());
-        return true;
-    },
-    openImport() {
-        if (!csvFile) return false;
-        csvFile.value = "";
-        csvFile.click();
-        return true;
-    },
-    getCurrentGameKey() {
-        return getCurrentGameKey();
-    }
-};
+rngArenaBtn?.addEventListener("click", () => {
+    showRngArena(getCurrentGameKey());
+});
 function detectCsvDelimiter(line) {
     const candidates = [";", "\t", ","];
     return candidates
@@ -555,7 +587,8 @@ const contentArea = document.getElementById("contentArea");
 
 
 function showGame(){
-contentArea.classList.remove("stats-view", "lab-view");
+stopRngArena();
+contentArea.classList.remove("stats-view", "lab-view", "rng-arena-view");
 const labels = currentGame.ranges.map((value, index) => {
 
     const start = index === 0
@@ -664,10 +697,15 @@ ${isSystemGame() ? `
     Generuj liczby
 </button>
 
+<button id="pureRandomBtn" class="primary-btn pure-random-btn">
+    🎲 PEŁNY RANDOM
+</button>
+
 <button id="autoForgeBtn" class="primary-btn auto-forge-btn">
     🧠 AUTO FORGE — ANALIZUJ
 </button>
 </div>
+<div class="rng-engine-note">🔐 Losowanie w LottoForge korzysta z Web Crypto API. AUTO FORGE nadal najpierw analizuje i ustala profil — crypto wykonuje tylko końcowy wybór liczb.</div>
 
 <div id="autoForgeReport" class="auto-forge-report"></div>
 
@@ -683,9 +721,12 @@ ${currentGame === games.extra ? `
 
 <div class="side-panel">
 
-   <h2>🎯 Filtry</h2>
-   <hr>
-
+<details id="manualFiltersPanel" class="manual-filters-panel" open>
+<summary>
+    <span>🎯 Filtry ręczne</span>
+    <small>struktura • suma • parzystość • wykluczenia • obowiązkowe</small>
+</summary>
+<div class="manual-filters-content">
 
 <h3>Struktura</h3>
 <div class="structure-scheme-hint">
@@ -833,9 +874,13 @@ ${currentGame.ranges.map((value,index)=>{
     placeholder="np. 2,7,11">
 ` : ""}
 
+</div>
+</details>
+
 `;
 
     const generateBtn = document.getElementById("generateBtn");
+    const pureRandomBtn = document.getElementById("pureRandomBtn");
     const autoForgeBtn = document.getElementById("autoForgeBtn");
 
     const autoForgeModeSelect = document.getElementById("autoForgeMode");
@@ -859,6 +904,7 @@ ${currentGame.ranges.map((value,index)=>{
     });
 
     generateBtn.addEventListener("click", () => generateTicketBatch());
+    pureRandomBtn?.addEventListener("click", generatePureRandomBatch);
     autoForgeBtn.addEventListener("click", runAutoForge);
     if (currentGame === games.multi) {
         const multiCount = document.getElementById("multiCount");
@@ -1164,13 +1210,13 @@ function getActiveBatchDiversityMultiplier(number) {
 
 function getBatchAwareRandomIndex(pool) {
     if (!pool.length) return -1;
-    if (!activeBatchDiversityUsage) return Math.floor(Math.random() * pool.length);
+    if (!activeBatchDiversityUsage) return cryptoRandomInt(0, pool.length - 1);
 
     const weights = pool.map(number => getActiveBatchDiversityMultiplier(number));
     const total = weights.reduce((sum, value) => sum + value, 0);
 
     if (total > 0) {
-        let roll = Math.random() * total;
+        let roll = cryptoRandomFloat() * total;
         for (let i = 0; i < weights.length; i++) {
             roll -= weights[i];
             if (roll <= 0) return i;
@@ -1196,7 +1242,7 @@ function getBatchAwareRandomIndex(pool) {
         }
     });
 
-    return leastUsedIndexes[Math.floor(Math.random() * leastUsedIndexes.length)] ?? 0;
+    return leastUsedIndexes[cryptoRandomInt(0, leastUsedIndexes.length - 1)] ?? 0;
 }
 
 function getTicketMainOverlap(ticketA, ticketB, ignoredNumbers = new Set()) {
@@ -1418,7 +1464,7 @@ function renderTicketBatch(tickets, options = {}) {
 function shuffleArray(values) {
     const result = [...values];
     for (let i = result.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
+        const j = cryptoRandomInt(0, i);
         [result[i], result[j]] = [result[j], result[i]];
     }
     return result;
@@ -1489,6 +1535,69 @@ function generateMultiCoverageBatch(analysis = null, profile = null) {
     }
 
     return tickets;
+}
+
+
+function generatePureRandomTicket() {
+    const targetCount = getGeneratorTargetCount();
+    const numbers = cryptoSampleUnique(targetCount, currentGame.max);
+    let euroNumbers = [];
+    let extraNumber = [];
+
+    if (currentGame === games.euro) {
+        euroNumbers = cryptoSampleUnique(currentGame.euroCount, currentGame.euroMax);
+    }
+
+    if (currentGame === games.extra) {
+        extraNumber = cryptoSampleUnique(currentGame.extraCount, currentGame.extraMax);
+    }
+
+    return buildTicketMeta(numbers, euroNumbers, extraNumber);
+}
+
+function generatePureRandomBatch() {
+    try {
+        stopRngArena();
+        const requested = getTicketBatchCount();
+        const tickets = [];
+        const seen = new Set();
+        const maxAttempts = Math.max(100, requested * 60);
+        let attempts = 0;
+
+        while (tickets.length < requested && attempts < maxAttempts) {
+            attempts++;
+            const ticket = generatePureRandomTicket();
+            const key = getTicketUniquenessKey(ticket);
+            if (seen.has(key)) continue;
+            seen.add(key);
+            tickets.push(ticket);
+        }
+
+        if (!tickets.length) {
+            throw new Error("Nie udało się utworzyć losowego kuponu.");
+        }
+
+        lastGeneratedTicketMeta = tickets[tickets.length - 1];
+        const report = document.getElementById("autoForgeReport");
+        if (report) report.innerHTML = "";
+        const numbersDiv = document.getElementById("numbers");
+        const euroDiv = document.getElementById("euroNumbers");
+        const extraDiv = document.getElementById("extraNumber");
+        if (numbersDiv) numbersDiv.innerHTML = "";
+        if (euroDiv) euroDiv.innerHTML = "";
+        if (extraDiv) extraDiv.innerHTML = "";
+
+        renderTicketBatch(tickets, {
+            title: "🎲 Pełny Random / Chybił-Trafił",
+            subtitle: "Web Crypto API • bez AUTO FORGE, HOT/MID/COLD, struktur, sumy, parzystości, wykluczeń i liczb obowiązkowych. Obowiązują wyłącznie zasady wybranej gry i liczba typowanych kul."
+        });
+
+        return tickets;
+    } catch (error) {
+        console.error("Pełny Random:", error);
+        alert(`❌ Nie udało się uruchomić pełnego randomu.\n\n${error.message}`);
+        return [];
+    }
 }
 
 function generateTicketBatch(autoForgePlanFactory = null, options = {}) {
@@ -3654,7 +3763,7 @@ function getAutoForgeWeightedRandomIndex(pool, plan, selectedNumbers = []) {
     const total = weights.reduce((a, b) => a + b, 0);
     if (total <= 0) return getBatchAwareRandomIndex(pool);
 
-    let roll = Math.random() * total;
+    let roll = cryptoRandomFloat() * total;
     for (let i = 0; i < weights.length; i++) {
         roll -= weights[i];
         if (roll <= 0) return i;
@@ -3769,7 +3878,7 @@ function getWeightedRandomIndex(pool, numberScores = []) {
     const total = weights.reduce((a, b) => a + b, 0);
     if (total <= 0) return getBatchAwareRandomIndex(pool);
 
-    let roll = Math.random() * total;
+    let roll = cryptoRandomFloat() * total;
     for (let i = 0; i < weights.length; i++) {
         roll -= weights[i];
         if (roll <= 0) return i;
@@ -3803,6 +3912,82 @@ function applyAutoForgeProfileToControls(analysis, structureOverride = null) {
     // Manualny generator nadal może korzystać z tego filtra po ponownym włączeniu.
     const sumFilter = document.getElementById("sumFilter");
     if (sumFilter) sumFilter.checked = false;
+}
+
+function formatNumbersForEverySecond(numbers) {
+    return (Array.isArray(numbers) ? numbers : [])
+        .map(number => String(Number(number)))
+        .join(", ");
+}
+
+function renderAutoForgeEverySecondCopyPanel(tickets = []) {
+    const container = document.getElementById("autoForgeGenerationResult");
+    if (!container || !Array.isArray(tickets) || !tickets.length) return;
+
+    const gameKey = getCurrentGameKey();
+    const validTickets = tickets.filter(ticket => Array.isArray(ticket?.numbers) && ticket.numbers.length);
+    if (!validTickets.length) return;
+
+    const rows = validTickets.map((ticket, index) => {
+        const mainText = formatNumbersForEverySecond(ticket.numbers);
+        const secondaryNumbers = gameKey === "euro"
+            ? (ticket.euroNumbers || [])
+            : gameKey === "extra"
+                ? (ticket.extraNumber || [])
+                : [];
+        const secondaryText = formatNumbersForEverySecond(secondaryNumbers);
+        const secondaryLabel = gameKey === "euro" ? "Euro" : gameKey === "extra" ? "Extra" : "";
+
+        return `
+            <div class="af-everysecond-copy-row">
+                <div class="af-everysecond-copy-ticket">
+                    <span>Kupon #${index + 1}</span>
+                    <code>${mainText}</code>
+                </div>
+                <button type="button" class="lab-secondary-btn af-everysecond-copy-btn"
+                    data-af-es-copy="main" data-ticket-index="${index}">📋 Kopiuj liczby</button>
+                ${secondaryText ? `
+                    <div class="af-everysecond-copy-ticket af-everysecond-secondary">
+                        <span>${secondaryLabel}</span>
+                        <code>${secondaryText}</code>
+                    </div>
+                    <button type="button" class="lab-secondary-btn af-everysecond-copy-btn"
+                        data-af-es-copy="secondary" data-ticket-index="${index}">📋 Kopiuj ${secondaryLabel}</button>
+                ` : ""}
+            </div>
+        `;
+    }).join("");
+
+    const panel = document.createElement("section");
+    panel.className = "af-everysecond-copy-panel";
+    panel.innerHTML = `
+        <div class="af-everysecond-copy-head">
+            <div>
+                <span>⚡ EVERY SECOND</span>
+                <strong>Kopiuj kupon jednym kliknięciem</strong>
+            </div>
+            <small>Format: liczba, liczba, liczba…</small>
+        </div>
+        <p>Skopiowany zestaw możesz wkleić prosto do pola „Moje typy” w RNG Arenie.</p>
+        <div class="af-everysecond-copy-list">${rows}</div>
+    `;
+
+    container.appendChild(panel);
+
+    panel.querySelectorAll("[data-af-es-copy]").forEach(button => {
+        button.addEventListener("click", () => {
+            const index = Number(button.dataset.ticketIndex);
+            const ticket = validTickets[index];
+            if (!ticket) return;
+
+            const part = button.dataset.afEsCopy;
+            const values = part === "secondary"
+                ? (gameKey === "euro" ? ticket.euroNumbers : ticket.extraNumber)
+                : ticket.numbers;
+
+            copyLaboratoryText(formatNumbersForEverySecond(values), button);
+        });
+    });
 }
 
 function renderAutoForgeGenerationResult(analysis, plan, numbers) {
@@ -3911,6 +4096,9 @@ function generateAutoForgeFromAnalysis(analysis, profileKey = "profile") {
         const numbers = generateMiniLotto(0, plan);
         if (!Array.isArray(numbers) || !numbers.length) return;
         renderAutoForgeGenerationResult(analysis, plan, numbers);
+        renderAutoForgeEverySecondCopyPanel(
+            lastGeneratedTicketMeta ? [lastGeneratedTicketMeta] : [{ numbers }]
+        );
         return;
     }
 
@@ -3932,7 +4120,77 @@ function generateAutoForgeFromAnalysis(analysis, profileKey = "profile") {
                 <p>Każdy kupon trzyma strukturę ${profile.structure.join("-")} oraz kontrolowany miks ${getAutoForgeTemperatureBudgetText(analysis.temperatureBudget)}. Gdy brakuje sensownego COLD+, jego slot przechodzi na MID.</p>
             </div>
         `;
+        renderAutoForgeEverySecondCopyPanel(tickets);
     }
+}
+
+
+function parseAutoForgeCustomStructure(rawValue, targetCount = getAutoForgeTargetCount()) {
+    const raw = String(rawValue ?? "").trim();
+
+    if (!raw) {
+        return {
+            ok: false,
+            message: "Wpisz strukturę, np. 0.0.0.0.0.0.4.4."
+        };
+    }
+
+    // Akceptujemy wygodne separatory: kropka, myślnik, przecinek, średnik,
+    // slash, pionowa kreska lub spacja. Każdy element musi być liczbą >= 0.
+    if (!/^\d+(?:\s*[-.,;|/]\s*\d+|\s+\d+)*$/.test(raw)) {
+        return {
+            ok: false,
+            message: "Użyj wyłącznie liczb całkowitych ≥ 0 oddzielonych kropką, myślnikiem, przecinkiem albo spacją."
+        };
+    }
+
+    const structure = raw
+        .split(/[\s.,;|/-]+/)
+        .filter(Boolean)
+        .map(value => Number(value));
+
+    if (
+        structure.length !== currentGame.ranges.length ||
+        structure.some(value => !Number.isInteger(value) || value < 0)
+    ) {
+        return {
+            ok: false,
+            message: `Ta gra wymaga dokładnie ${currentGame.ranges.length} pól struktury.`
+        };
+    }
+
+    const total = structure.reduce((sum, value) => sum + value, 0);
+    if (total !== targetCount) {
+        return {
+            ok: false,
+            message: `Suma struktury musi wynosić dokładnie ${targetCount}. Teraz wynosi ${total}.`
+        };
+    }
+
+    for (let index = 0; index < currentGame.ranges.length; index++) {
+        const start = index === 0 ? 1 : currentGame.ranges[index - 1] + 1;
+        const end = currentGame.ranges[index];
+        const capacity = end - start + 1;
+
+        if (structure[index] > capacity) {
+            return {
+                ok: false,
+                message: `Sektor ${start}-${end} ma pojemność ${capacity}, a wpisano ${structure[index]}.`
+            };
+        }
+    }
+
+    return {
+        ok: true,
+        structure,
+        normalized: structure.join("-"),
+        message: `Gotowe: ${structure.join("-")} • suma ${targetCount}.`
+    };
+}
+
+function collapseManualFiltersForAutoForge() {
+    const panel = document.getElementById("manualFiltersPanel");
+    if (panel) panel.open = false;
 }
 
 function renderAutoForgeReport(analysis) {
@@ -4025,11 +4283,13 @@ function renderAutoForgeReport(analysis) {
         `;
     }).join("");
 
-    const manualStructureOptions = (analysis.structureActivityRanking || []).slice(0, 10).map((item, index) => {
-        const scaled = item.targetStructure.join("-");
-        const scaleLabel = scaled !== item.key ? ` → ${scaled}` : "";
-        return `<option value="${item.key}" ${index === 0 ? "selected" : ""}>#${index + 1} ${item.key}${scaleLabel} • ${item.count}/${item.windowSize} • ${item.trend.directionShort}</option>`;
-    }).join("");
+    const manualStructureSectorLabels = currentGame.ranges.map((value, index) => {
+        const start = index === 0 ? 1 : currentGame.ranges[index - 1] + 1;
+        return `${start}-${value}`;
+    }).join(" • ");
+    const manualStructureExample = currentGame === games.multi && analysis.targetCount === 8
+        ? "0.0.0.0.0.0.4.4"
+        : analysis.structure.join(".");
 
     report.innerHTML = `
         <div class="auto-forge-card auto-forge-diagnostic">
@@ -4102,39 +4362,44 @@ function renderAutoForgeReport(analysis) {
                 </div>
             </div>
 
-            <div class="auto-forge-section auto-forge-pattern-section">
-                <h4>🔁 Powroty + pary + trójki + czwórki</h4>
-                <div class="auto-forge-pattern-grid">
-                    <div>
-                        <span>Śr. powrotów w pełnym losowaniu</span>
-                        <strong>${analysis.patternModel.averageReturnCount.toFixed(2)}</strong>
+            <details class="auto-forge-section auto-forge-pattern-section auto-forge-collapsible-section">
+                <summary class="auto-forge-collapsible-summary">
+                    <span>🔁 Powroty + pary + trójki + czwórki</span>
+                    <small>parametr pomocniczy • kliknij, aby rozwinąć</small>
+                </summary>
+                <div class="auto-forge-collapsible-body">
+                    <div class="auto-forge-pattern-grid">
+                        <div>
+                            <span>Śr. powrotów w pełnym losowaniu</span>
+                            <strong>${analysis.patternModel.averageReturnCount.toFixed(2)}</strong>
+                        </div>
+                        <div>
+                            <span>Miękki cel dla ${analysis.targetCount} typów</span>
+                            <strong>${analysis.suggestedReturnCount}</strong>
+                        </div>
+                        <div class="wide">
+                            <span>Kandydaci do powrotu z ostatniego losowania</span>
+                            <strong>${repeatCandidatesText}</strong>
+                        </div>
+                        <div class="wide">
+                            <span>Najmocniejsze pary w aktywnej strukturze</span>
+                            <strong>${topPairsText}</strong>
+                        </div>
+                        <div class="wide">
+                            <span>Najmocniejsze trójki</span>
+                            <strong>${topTriplesText}</strong>
+                        </div>
+                        <div class="wide">
+                            <span>Czwórki — sygnał pomocniczy</span>
+                            <strong>${topQuadsText}</strong>
+                        </div>
                     </div>
-                    <div>
-                        <span>Miękki cel dla ${analysis.targetCount} typów</span>
-                        <strong>${analysis.suggestedReturnCount}</strong>
-                    </div>
-                    <div class="wide">
-                        <span>Kandydaci do powrotu z ostatniego losowania</span>
-                        <strong>${repeatCandidatesText}</strong>
-                    </div>
-                    <div class="wide">
-                        <span>Najmocniejsze pary w aktywnej strukturze</span>
-                        <strong>${topPairsText}</strong>
-                    </div>
-                    <div class="wide">
-                        <span>Najmocniejsze trójki</span>
-                        <strong>${topTriplesText}</strong>
-                    </div>
-                    <div class="wide">
-                        <span>Czwórki — sygnał pomocniczy</span>
-                        <strong>${topQuadsText}</strong>
-                    </div>
+                    <small class="auto-forge-pattern-note">
+                        Procent przy relacji oznacza ważoną częstość współwystąpienia.
+                        Okna relacji: ${analysis.patternWindowsLabel}. Powroty i relacje są wagami wyboru, nie sztywnymi wymogami kuponu.
+                    </small>
                 </div>
-                <small class="auto-forge-pattern-note">
-                    Procent przy relacji oznacza ważoną częstość współwystąpienia.
-                    Okna relacji: ${analysis.patternWindowsLabel}. Powroty i relacje są wagami wyboru, nie sztywnymi wymogami kuponu.
-                </small>
-            </div>
+            </details>
 
             <div class="auto-forge-section auto-forge-structure-ranking-section">
                 <h4>🏆 Aktywne struktury — ranking AUTO</h4>
@@ -4160,17 +4425,29 @@ function renderAutoForgeReport(analysis) {
             </div>
 
             <div class="auto-forge-section auto-forge-manual-structure-section">
-                <h4>✋ Awaryjny ręczny wybór struktury</h4>
+                <h4>✍️ Własna struktura — twardy wzorzec</h4>
                 <div class="auto-forge-manual-structure-control">
-                    <select id="autoForgeManualStructureSelect" ${manualStructureOptions ? "" : "disabled"}>
-                        ${manualStructureOptions || `<option>Brak struktur do wyboru</option>`}
-                    </select>
-                    <button type="button" id="autoForgeManualStructureBtn" class="primary-btn" ${manualStructureOptions ? "" : "disabled"}>
-                        Generuj z wybraną strukturą
+                    <input
+                        type="text"
+                        id="autoForgeManualStructureInput"
+                        value="${analysis.structure.join("-")}"
+                        placeholder="np. ${manualStructureExample}"
+                        inputmode="text"
+                        autocomplete="off">
+                    <button type="button" id="autoForgeManualStructureBtn" class="primary-btn">
+                        Generuj z moją strukturą
                     </button>
                 </div>
+                <div class="auto-forge-manual-structure-meta">
+                    <span>Sektory: <strong>${manualStructureSectorLabels}</strong></span>
+                    <span>Wymagana suma: <strong>${analysis.targetCount}</strong></span>
+                </div>
+                <div id="autoForgeManualStructureStatus" class="auto-forge-manual-structure-status">
+                    Możesz wpisać własny układ, np. ${manualStructureExample}. Kropki, myślniki, przecinki i spacje są akceptowane.
+                </div>
                 <small class="auto-forge-pattern-note">
-                    Ręczny wybór jest twardym ograniczeniem struktury. AUTO nadal dobiera liczby wewnątrz wybranych sektorów według pozostałych wag i filtrów.
+                    Twoja struktura staje się twardym ograniczeniem sektorów. AUTO FORGE dalej sam dobiera konkretne liczby przez aktywność sektorów,
+                    HOT / MID / COLD+, powroty, relacje, parzystość i ważone RNG. Liczby obowiązkowe oraz wykluczenia nadal są respektowane.
                 </small>
             </div>
 
@@ -4239,25 +4516,54 @@ function renderAutoForgeReport(analysis) {
         });
     }
 
-    const manualStructureSelect = document.getElementById("autoForgeManualStructureSelect");
+    const manualStructureInput = document.getElementById("autoForgeManualStructureInput");
     const manualStructureBtn = document.getElementById("autoForgeManualStructureBtn");
+    const manualStructureStatus = document.getElementById("autoForgeManualStructureStatus");
 
-    if (manualStructureSelect && manualStructureBtn) {
-        manualStructureBtn.addEventListener("click", () => {
-            const selected = (analysis.structureActivityRanking || [])
-                .find(item => item.key === manualStructureSelect.value);
-            if (!selected) return;
+    const refreshManualStructureStatus = () => {
+        if (!manualStructureInput || !manualStructureStatus) return null;
 
-            autoForgeManualStructureOverride = selected.key;
-            generateAutoForgeFromAnalysis(analysis, {
-                key: "manual",
-                label: `RĘCZNY ${selected.key}`,
-                icon: "✋",
-                structure: [...selected.targetStructure],
-                sourceStructure: selected.key,
-                activity: selected
-            });
+        const parsed = parseAutoForgeCustomStructure(
+            manualStructureInput.value,
+            analysis.targetCount
+        );
+
+        manualStructureStatus.textContent = parsed.message;
+        manualStructureStatus.classList.toggle("ok", parsed.ok);
+        manualStructureStatus.classList.toggle("error", !parsed.ok);
+
+        return parsed;
+    };
+
+    const generateFromManualStructure = () => {
+        const parsed = refreshManualStructureStatus();
+        if (!parsed?.ok) {
+            alert(`❌ Własna struktura AUTO FORGE\n\n${parsed?.message || "Sprawdź wpisany wzorzec."}`);
+            return;
+        }
+
+        autoForgeManualStructureOverride = parsed.normalized;
+
+        generateAutoForgeFromAnalysis(analysis, {
+            key: "manual-custom",
+            label: `WŁASNY ${parsed.normalized}`,
+            icon: "✍️",
+            structure: [...parsed.structure],
+            sourceStructure: parsed.normalized,
+            activity: null
         });
+    };
+
+    if (manualStructureInput && manualStructureBtn) {
+        manualStructureInput.addEventListener("input", refreshManualStructureStatus);
+        manualStructureInput.addEventListener("keydown", event => {
+            if (event.key === "Enter") {
+                event.preventDefault();
+                generateFromManualStructure();
+            }
+        });
+        manualStructureBtn.addEventListener("click", generateFromManualStructure);
+        refreshManualStructureStatus();
     }
 }
 
@@ -4273,6 +4579,7 @@ function runAutoForge() {
     // osobnym przyciskiem "GENERUJ Z TEGO PROFILU", więc decyzja pozostaje czytelna.
     autoForgeSecondaryOverride = null;
     renderAutoForgeReport(analysis);
+    collapseManualFiltersForAutoForge();
 }
 
 function validateStructureSettings() {
@@ -4847,7 +5154,7 @@ const euroExcludedNumbers =
         .filter(n => !isNaN(n));
     while(numbers.length < count){
 
-        let n = Math.floor(Math.random()*max)+1;
+        let n = cryptoRandomInt(1, max);
 
        if (
     !numbers.includes(n) &&
@@ -5109,15 +5416,20 @@ function renderStatsPatternBox(title, icon, stats) {
         `;
 
     return `
-        <div class="statsBox stats-pattern-box">
-            <h3>${icon} ${title} <small>${windowLabel}</small></h3>
-            ${rows}
-            ${stats.limited ? `
-                <p class="stats-pattern-note">
-                    Dłuższy zakres został skrócony dla tej statystyki, aby zachować nacisk na aktualne wzorce i płynność aplikacji.
-                </p>
-            ` : ''}
-        </div>
+        <details class="statsBox stats-pattern-box stats-collapsible-card">
+            <summary class="stats-collapsible-summary">
+                <h3>${icon} ${title} <small>${windowLabel}</small></h3>
+                <span>Rozwiń</span>
+            </summary>
+            <div class="stats-collapsible-body">
+                ${rows}
+                ${stats.limited ? `
+                    <p class="stats-pattern-note">
+                        Dłuższy zakres został skrócony dla tej statystyki, aby zachować nacisk na aktualne wzorce i płynność aplikacji.
+                    </p>
+                ` : ''}
+            </div>
+        </details>
     `;
 }
 
@@ -6243,8 +6555,9 @@ function initializeStatsDashboard() {
 }
 
 function pokazStatystyki() {
+    stopRngArena();
 
-    contentArea.classList.remove("lab-view");
+    contentArea.classList.remove("lab-view", "rng-arena-view");
 
     // Widok statystyk korzysta z własnego układu kolumnowego.
     // Bez tego #contentArea (flex w generatorze) rozciągał panele na całą wysokość ekranu.
@@ -6857,7 +7170,11 @@ ${renderStatsPatternBox("TOP PARY", "🔗", pairStats)}
 ${renderStatsPatternBox("TOP TRÓJKI", "🔺", tripleStats)}
 ${renderStatsPatternBox("TOP CZWÓRKI", "◼️", quadStats)}
 
-<section class="stats-return-panel">
+<details class="stats-return-panel stats-collapsible-card stats-return-collapsible">
+    <summary class="stats-return-collapse-summary">
+        <span>🔁 POWROTY Z LOSOWANIA DO LOSOWANIA</span>
+        <strong>średnio ${returnStats.average.toFixed(2)} • kliknij, aby rozwinąć</strong>
+    </summary>
     <div class="stats-return-head">
         <div>
             <span>🔁 POWROTY Z LOSOWANIA DO LOSOWANIA</span>
@@ -6936,7 +7253,7 @@ ${renderStatsPatternBox("TOP CZWÓRKI", "◼️", quadStats)}
     <p class="stats-return-note">
         Powrót oznacza, że liczba wystąpiła w jednym losowaniu i pojawiła się ponownie w bezpośrednio następnym losowaniu. Współczynnik pokazuje historyczny udział takich powrotów w wybranym oknie.
     </p>
-</section>
+</details>
 
 </div>
 
@@ -7160,7 +7477,7 @@ function saveLaboratoryEntries(entries) {
 }
 
 function makeLaboratoryId() {
-    return `lab-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    return `lab-${Date.now()}-${cryptoRandomToken().slice(0, 9)}`;
 }
 
 function getLaboratoryDraws(gameKey = laboratoryGameKey) {
@@ -7761,11 +8078,12 @@ function bindLaboratoryEvents() {
 }
 
 function showLaboratory(gameKey = null) {
+    stopRngArena();
     if (gameKey && LAB_GAME_CONFIGS[gameKey]) laboratoryGameKey = gameKey;
     const config = getLaboratoryConfig(laboratoryGameKey);
     currentGame = games[laboratoryGameKey];
 
-    contentArea.classList.remove("stats-view");
+    contentArea.classList.remove("stats-view", "rng-arena-view");
     contentArea.classList.add("lab-view");
 
     resolveLaboratoryEntries(laboratoryGameKey);
@@ -7895,4 +8213,1391 @@ function showLaboratory(gameKey = null) {
     const setsInput = document.getElementById("labSetsInput");
     if (setsInput && draftText) setsInput.value = draftText;
     bindLaboratoryEvents();
+}
+
+
+// =========================================================
+// LOTTOFORGE — EVERY SECOND / RNG ARENA
+// =========================================================
+const RNG_ARENA_GAME_CONFIG = {
+    mini: {
+        label: "Mini Lotto",
+        drawCount: 5,
+        max: 42,
+        pickCount: 5,
+        pickMin: 5,
+        pickMax: 12,
+        variablePick: true,
+        systemMode: true,
+        perfectMode: "draw"
+    },
+    lotto: {
+        label: "Lotto",
+        drawCount: 6,
+        max: 49,
+        pickCount: 6,
+        pickMin: 6,
+        pickMax: 12,
+        variablePick: true,
+        systemMode: true,
+        perfectMode: "draw"
+    },
+    euro: {
+        label: "EuroJackpot",
+        drawCount: 5,
+        max: 50,
+        pickCount: 5,
+        pickMin: 5,
+        pickMax: 12,
+        variablePick: true,
+        systemMode: true,
+        perfectMode: "draw",
+        secondary: {
+            label: "Euro",
+            drawCount: 2,
+            max: 12,
+            pickCount: 2,
+            pickMin: 2,
+            pickMax: 12,
+            variablePick: true,
+            systemMode: true,
+            perfectMode: "draw"
+        }
+    },
+    multi: {
+        label: "Multi Multi",
+        drawCount: 20,
+        max: 80,
+        pickCount: 9,
+        pickMin: 1,
+        pickMax: 10,
+        variablePick: true,
+        perfectMode: "ticket"
+    },
+    extra: {
+        label: "Extra Pensja",
+        drawCount: 5,
+        max: 35,
+        pickCount: 5,
+        perfectMode: "ticket",
+        secondary: { label: "Extra", drawCount: 1, max: 4, pickCount: 1, perfectMode: "ticket" }
+    }
+};
+
+// =========================================================
+// LOTTOFORGE — EVERY SECOND / FINANSE SYMULACJI
+// Stan modelu: 09.09.2026.
+// Kwoty zmienne są historycznymi średnimi/estymatami — nie prognozą przyszłej wypłaty.
+// Plus / Lotto Plus / Ekstra Premia / podwyższone stawki i czasowe promocje nie są tutaj symulowane.
+// =========================================================
+const RNG_ARENA_FINANCE_MODEL = {
+    modelDate: "09.09.2026",
+    euroReferenceRate: 4.31,
+    mini: {
+        baseCost: 2.00,
+        payouts: {
+            3: 40.31,
+            4: 1000.28,
+            5: 282743.36
+        },
+        modelLabel: "ŚREDNIE / ESTYMATA",
+        note: "3/5 i 4/5: średnia ważona z ostatnich 100 losowań. 5/5: estymata historyczna na podstawie typowej puli 300–600 tys. zł i liczby zwycięskich kuponów."
+    },
+    lotto: {
+        baseCost: 5.00,
+        payouts: {
+            3: 35.00,
+            4: 180.70,
+            5: 6003.53,
+            6: 7173107.60
+        },
+        modelLabel: "35 ZŁ STAŁE + ŚREDNIE",
+        note: "3/6: gwarantowane 35 zł. 4/6 i 5/6: średnie z ostatnich 100 losowań. 6/6: historyczna średnia wypłaty na zwycięski kupon — rzeczywista kumulacja może być dużo niższa lub wyższa."
+    },
+    euro: {
+        baseCost: 12.50,
+        payouts: {
+            "5+2": 155491970.42,
+            "5+1": 3817405.53,
+            "5+0": 793951.96,
+            "4+2": 20983.51,
+            "4+1": 1325.60,
+            "3+2": 656.65,
+            "4+0": 479.35,
+            "2+2": 104.38,
+            "3+1": 85.34,
+            "3+0": 75.35,
+            "1+2": 52.27,
+            "2+1": 42.04
+        },
+        modelLabel: "ŚREDNIA OSTATNICH LOSOWAŃ",
+        note: "Średnie na zwycięski kupon z 11 ostatnich analizowanych losowań EuroJackpot; poziomy bez zwycięzcy w danym losowaniu pominięto. Przeliczenie referencyjne EUR→PLN: 4,31."
+    },
+    multi: {
+        baseCost: 2.50,
+        payouts: {
+            1:  { 1: 4 },
+            2:  { 2: 16 },
+            3:  { 2: 2, 3: 54 },
+            4:  { 2: 2, 3: 8, 4: 84 },
+            5:  { 3: 4, 4: 20, 5: 700 },
+            6:  { 3: 2, 4: 8, 5: 120, 6: 1300 },
+            7:  { 3: 2, 4: 4, 5: 20, 6: 200, 7: 6000 },
+            8:  { 4: 4, 5: 20, 6: 60, 7: 600, 8: 22000 },
+            9:  { 4: 2, 5: 8, 6: 42, 7: 300, 8: 2000, 9: 70000 },
+            10: { 4: 2, 5: 4, 6: 12, 7: 140, 8: 520, 9: 10000, 10: 250000 }
+        },
+        modelLabel: "TABELA STAŁA",
+        note: "Oficjalna tabela Multi Multi dla stawki x1 bez Plusa. Czasowe promocje nie są doliczane."
+    },
+    extra: {
+        baseCost: 5.00,
+        payouts: {
+            "5+1": 1200000,
+            "5+0": 25000,
+            "4+1": 1000,
+            "4+0": 200,
+            "3+1": 80,
+            "3+0": 25,
+            "2+1": 10,
+            "2+0": 5
+        },
+        modelLabel: "TABELA STAŁA",
+        note: "Ekstra Pensja bez Ekstra Premii i przy stawce x1. 5+1 pokazujemy nominalnie jako 1 200 000 zł = 240 × 5 000 zł wypłacane przez 20 lat."
+    }
+};
+
+function rngArenaNCr(n, r) {
+    n = Math.floor(Number(n));
+    r = Math.floor(Number(r));
+    if (!Number.isFinite(n) || !Number.isFinite(r) || r < 0 || r > n) return 0;
+    r = Math.min(r, n - r);
+    let result = 1;
+    for (let i = 1; i <= r; i++) {
+        result = (result * (n - r + i)) / i;
+    }
+    return Math.round(result);
+}
+
+function getRngArenaSimpleBetCount(gameKey = rngArenaState?.gameKey, pickCount = getRngArenaPickCount(), secondaryPickCount = getRngArenaSecondaryPickCount()) {
+    if (gameKey === "mini") return rngArenaNCr(pickCount, 5);
+    if (gameKey === "lotto") return rngArenaNCr(pickCount, 6);
+    if (gameKey === "euro") {
+        return rngArenaNCr(pickCount, 5) * rngArenaNCr(secondaryPickCount, 2);
+    }
+    return 1;
+}
+
+function getRngArenaTicketCost(gameKey = rngArenaState?.gameKey, pickCount = getRngArenaPickCount(), secondaryPickCount = getRngArenaSecondaryPickCount()) {
+    const model = RNG_ARENA_FINANCE_MODEL[gameKey];
+    if (!model) return 0;
+    return model.baseCost * getRngArenaSimpleBetCount(gameKey, pickCount, secondaryPickCount);
+}
+
+function getRngArenaExactSystemComboCount(totalPicked, totalHits, simpleSize, exactHits) {
+    return (
+        rngArenaNCr(totalHits, exactHits) *
+        rngArenaNCr(totalPicked - totalHits, simpleSize - exactHits)
+    );
+}
+
+function getRngArenaRoundPrize(gameKey, mainHits, secondaryHits, pickCount = getRngArenaPickCount(), secondaryPickCount = getRngArenaSecondaryPickCount()) {
+    const model = RNG_ARENA_FINANCE_MODEL[gameKey];
+    if (!model) return 0;
+
+    if (gameKey === "mini") {
+        let total = 0;
+        for (let exactHits = 3; exactHits <= 5; exactHits++) {
+            total += getRngArenaExactSystemComboCount(pickCount, mainHits, 5, exactHits) *
+                Number(model.payouts[exactHits] || 0);
+        }
+        return total;
+    }
+
+    if (gameKey === "lotto") {
+        let total = 0;
+        for (let exactHits = 3; exactHits <= 6; exactHits++) {
+            total += getRngArenaExactSystemComboCount(pickCount, mainHits, 6, exactHits) *
+                Number(model.payouts[exactHits] || 0);
+        }
+        return total;
+    }
+
+    if (gameKey === "euro") {
+        let total = 0;
+        Object.entries(model.payouts).forEach(([signature, payout]) => {
+            const [exactMainHits, exactSecondaryHits] = signature.split("+").map(Number);
+            const mainCombos =
+                rngArenaNCr(mainHits, exactMainHits) *
+                rngArenaNCr(pickCount - mainHits, 5 - exactMainHits);
+            const secondaryCombos =
+                rngArenaNCr(secondaryHits, exactSecondaryHits) *
+                rngArenaNCr(secondaryPickCount - secondaryHits, 2 - exactSecondaryHits);
+            total += mainCombos * secondaryCombos * Number(payout || 0);
+        });
+        return total;
+    }
+
+    if (gameKey === "multi") {
+        return Number(model.payouts[pickCount]?.[mainHits] || 0);
+    }
+
+    if (gameKey === "extra") {
+        return Number(model.payouts[`${mainHits}+${secondaryHits}`] || 0);
+    }
+
+    return 0;
+}
+
+function formatRngArenaMoney(value) {
+    return new Intl.NumberFormat("pl-PL", {
+        style: "currency",
+        currency: "PLN",
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+    }).format(Number(value || 0));
+}
+
+function getRngArenaFinanceInfo(gameKey = rngArenaState?.gameKey, pickCount = getRngArenaPickCount(), secondaryPickCount = getRngArenaSecondaryPickCount()) {
+    const model = RNG_ARENA_FINANCE_MODEL[gameKey];
+    const simpleBets = getRngArenaSimpleBetCount(gameKey, pickCount, secondaryPickCount);
+    const cost = getRngArenaTicketCost(gameKey, pickCount, secondaryPickCount);
+    const comboText = simpleBets > 1
+        ? `${simpleBets.toLocaleString("pl-PL")} zakładów prostych × ${formatRngArenaMoney(model.baseCost)}`
+        : `1 zakład × ${formatRngArenaMoney(model.baseCost)}`;
+
+    return {
+        cost,
+        simpleBets,
+        comboText,
+        modelLabel: model?.modelLabel || "—",
+        note: model?.note || ""
+   };
+}
+
+function renderRngArenaPrizeTable(gameKey = rngArenaState?.gameKey, pickCount = getRngArenaPickCount()) {
+    const model = RNG_ARENA_FINANCE_MODEL[gameKey];
+    if (!model) return "";
+
+    let rows = [];
+    if (gameKey === "mini") {
+        rows = [
+            ["3/5", model.payouts[3], "średnia"],
+            ["4/5", model.payouts[4], "średnia"],
+            ["5/5", model.payouts[5], "estymata"]
+        ];
+    } else if (gameKey === "lotto") {
+        rows = [
+            ["3/6", model.payouts[3], "stała"],
+            ["4/6", model.payouts[4], "średnia"],
+            ["5/6", model.payouts[5], "średnia"],
+            ["6/6", model.payouts[6], "średnia historyczna"]
+        ];
+    } else if (gameKey === "euro") {
+        const order = ["5+2","5+1","5+0","4+2","4+1","3+2","4+0","2+2","3+1","3+0","1+2","2+1"];
+        rows = order.map(signature => [signature, model.payouts[signature], "średnia"]);
+    } else if (gameKey === "multi") {
+        const payoutMap = model.payouts[pickCount] || {};
+        rows = Object.entries(payoutMap)
+            .map(([hits, payout]) => [ `${hits}/${pickCount}`, payout, "stała" ])
+            .sort((a, b) => Number(a[0].split("/")[0]) - Number(b[0].split("/")[0]));
+    } else if (gameKey === "extra") {
+        const order = ["5+1","5+0","4+1","4+0","3+1","3+0","2+1","2+0"];
+        rows = order.map(signature => [signature, model.payouts[signature], "stała"]);
+    }
+
+    const rowHtml = rows.map(([result, payout, basis]) => `
+        <tr>
+            <td><strong>${result}</strong></td>
+            <td>${formatRngArenaMoney(payout)}</td>
+            <td>${basis}</td>
+        </tr>
+    `).join("");
+
+    return `
+        <details class="rng-arena-prize-table">
+            <summary>📋 Tabela wypłat używana przez symulator</summary>
+            <div class="rng-arena-prize-table-wrap">
+                <table>
+                    <thead><tr><th>Wynik</th><th>Kwota</th><th>Model</th></tr></thead>
+                    <tbody>${rowHtml}</tbody>
+                </table>
+            </div>
+            <small>
+                Kwoty dotyczą pojedynczego zakładu prostego. Przy systemie LottoForge automatycznie liczy wszystkie zwycięskie kombinacje i sumuje ich wypłaty.
+            </small>
+        </details>
+    `;
+}
+
+let rngArenaTimer = null;
+let rngArenaState = null;
+let rngArenaAudioContext = null;
+
+const RNG_ARENA_SOUND_PRIORITY = { alert: 1, big: 2, epic: 3 };
+
+function ensureRngArenaAudio() {
+    if (!rngArenaState?.soundEnabled) return null;
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return null;
+
+    if (!rngArenaAudioContext) {
+        rngArenaAudioContext = new AudioContextClass();
+    }
+    if (rngArenaAudioContext.state === "suspended") {
+        rngArenaAudioContext.resume().catch(() => {});
+    }
+    return rngArenaAudioContext;
+}
+
+function rngArenaTone(ctx, frequency, start, duration, volume = 0.045, type = "sine") {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(frequency, start);
+    gain.gain.setValueAtTime(0.0001, start);
+    gain.gain.exponentialRampToValueAtTime(Math.max(0.0002, volume), start + 0.012);
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(start);
+    osc.stop(start + duration + 0.03);
+}
+
+function playRngArenaSound(tier = "alert") {
+    if (!rngArenaState?.soundEnabled) return;
+    const ctx = ensureRngArenaAudio();
+    if (!ctx) return;
+    const now = ctx.currentTime + 0.015;
+
+    if (tier === "epic") {
+        // Krótka fanfara jackpotowa — bez zewnętrznych plików audio.
+        const notes = [392, 523.25, 659.25, 783.99, 1046.5];
+        notes.forEach((freq, index) => {
+            rngArenaTone(ctx, freq, now + index * 0.095, 0.22, 0.055, index < 2 ? "triangle" : "sine");
+        });
+        [523.25, 659.25, 783.99, 1046.5].forEach(freq => {
+            rngArenaTone(ctx, freq, now + 0.52, 0.58, 0.032, "triangle");
+        });
+        return;
+    }
+
+    if (tier === "big") {
+        [523.25, 659.25, 783.99, 987.77].forEach((freq, index) => {
+            rngArenaTone(ctx, freq, now + index * 0.105, 0.20, 0.045, "triangle");
+        });
+        return;
+    }
+
+    // Zwykłe trafienie/wygrana: wyraźny podwójny buzzer.
+    rngArenaTone(ctx, 660, now, 0.16, 0.04, "square");
+    rngArenaTone(ctx, 880, now + 0.18, 0.20, 0.045, "square");
+}
+
+function getRngArenaWinSound(gameKey, mainHits, secondaryHits, pickCount) {
+    if (gameKey === "mini") {
+        if (mainHits >= 5) return { tier: "epic", result: `${mainHits}/5`, label: "JACKPOT" };
+        if (mainHits >= 3) return { tier: "alert", result: `${mainHits}/5`, label: "WYGRANA" };
+        return null;
+    }
+
+    if (gameKey === "lotto") {
+        if (mainHits >= 6) return { tier: "epic", result: `${mainHits}/6`, label: "JACKPOT" };
+        if (mainHits >= 3) return { tier: "alert", result: `${mainHits}/6`, label: "WYGRANA" };
+        return null;
+    }
+
+    if (gameKey === "euro") {
+        const signature = `${mainHits}+${secondaryHits}`;
+        const winning = new Set([
+            "5+2", "5+1", "5+0", "4+2", "4+1", "3+2",
+            "4+0", "2+2", "3+1", "3+0", "1+2", "2+1"
+        ]);
+        if (!winning.has(signature)) return null;
+        if (signature === "5+2") return { tier: "epic", result: signature, label: "JACKPOT" };
+        if (["5+1", "5+0", "4+2"].includes(signature)) {
+            return { tier: "big", result: signature, label: "DUŻA WYGRANA" };
+        }
+        return { tier: "alert", result: signature, label: "WYGRANA" };
+    }
+
+    if (gameKey === "multi") {
+        const rules = {
+            1:  { min: 1, big: 1 },
+            2:  { min: 2, big: 2 },
+            3:  { min: 2, big: 3 },
+            4:  { min: 2, big: 4 },
+            5:  { min: 3, big: 5 },
+            6:  { min: 3, big: 5 },
+            7:  { min: 3, big: 6 },
+            8:  { min: 4, big: 7 },
+            9:  { min: 4, big: 7 },
+            10: { min: 4, big: 8 }
+        };
+        const count = clamp(Number(pickCount || 1), 1, 10);
+        const rule = rules[count];
+        if (mainHits < rule.min) return null;
+        if (mainHits === count) return { tier: "epic", result: `${mainHits}/${count}`, label: "GŁÓWNA WYGRANA" };
+        if (mainHits >= rule.big) return { tier: "big", result: `${mainHits}/${count}`, label: "DUŻA WYGRANA" };
+        return { tier: "alert", result: `${mainHits}/${count}`, label: "WYGRANA" };
+    }
+
+    return null;
+}
+
+function pickStrongerRngArenaSound(current, candidate) {
+    if (!candidate) return current;
+    if (!current) return candidate;
+    const currentRank = RNG_ARENA_SOUND_PRIORITY[current.tier] || 0;
+    const candidateRank = RNG_ARENA_SOUND_PRIORITY[candidate.tier] || 0;
+    return candidateRank >= currentRank ? candidate : current;
+}
+
+function triggerRngArenaWinEvent(event) {
+    if (!event || !rngArenaState) return;
+    rngArenaState.lastWinEvent = { ...event, atRound: event.round || rngArenaState.rounds };
+    playRngArenaSound(event.tier);
+}
+
+function makeRngArenaCompetitor(label) {
+    return {
+        label,
+        ticket: [],
+        secondary: [],
+        wins: 0,
+        bestMain: 0,
+        bestSecondary: 0,
+        perfects: 0,
+        hitCounts: {},
+        lastMainHits: 0,
+        lastSecondaryHits: 0,
+        spent: 0,
+        won: 0,
+        lastPrize: 0
+    };
+}
+
+function createRngArenaState(gameKey = "mini") {
+    const key = RNG_ARENA_GAME_CONFIG[gameKey] ? gameKey : "mini";
+    const durationMinutes = 60;
+    return {
+        gameKey: key,
+        rounds: 0,
+        ties: 0,
+        running: false,
+        speed: 1,
+        pickCount: RNG_ARENA_GAME_CONFIG[key].pickCount,
+        secondaryPickCount: RNG_ARENA_GAME_CONFIG[key].secondary?.pickCount || 0,
+        user2Enabled: true,
+        soundEnabled: true,
+        durationMinutes,
+        remainingMs: durationMinutes * 60 * 1000,
+        timerEndAt: null,
+        sessionCompleted: false,
+        sessionSummary: null,
+        lastWinEvent: null,
+        firstPerfect: null,
+        lastDraw: [],
+        lastSecondaryDraw: [],
+        competitors: {
+            rng: makeRngArenaCompetitor("🎲 RNG / Chybił-Trafił"),
+            me: makeRngArenaCompetitor("👤 Moje typy"),
+            user2: makeRngArenaCompetitor("👥 Dodatkowy użytkownik")
+        }
+    };
+}
+
+function getRngArenaDurationMs() {
+    const minutes = Math.max(0, Number(rngArenaState?.durationMinutes || 0));
+    return minutes * 60 * 1000;
+}
+
+function syncRngArenaRemainingTime() {
+    if (!rngArenaState) return 0;
+    if (Number(rngArenaState.durationMinutes || 0) <= 0) return Infinity;
+
+    if (rngArenaState.running && Number.isFinite(rngArenaState.timerEndAt)) {
+        rngArenaState.remainingMs = Math.max(0, rngArenaState.timerEndAt - Date.now());
+    }
+    return Math.max(0, Number(rngArenaState.remainingMs || 0));
+}
+
+function formatRngArenaClock(ms) {
+    if (!Number.isFinite(ms)) return "∞";
+    const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    return [hours, minutes, seconds].map(value => String(value).padStart(2, "0")).join(":");
+}
+
+function stopRngArena() {
+    if (rngArenaState?.running && Number(rngArenaState.durationMinutes || 0) > 0) {
+        syncRngArenaRemainingTime();
+    }
+    if (rngArenaTimer) {
+        clearInterval(rngArenaTimer);
+        rngArenaTimer = null;
+    }
+    if (rngArenaState) {
+        rngArenaState.running = false;
+        rngArenaState.timerEndAt = null;
+    }
+}
+
+function getRngArenaConfig() {
+    return RNG_ARENA_GAME_CONFIG[rngArenaState?.gameKey] || RNG_ARENA_GAME_CONFIG.mini;
+}
+
+function getRngArenaPickCount() {
+    const config = getRngArenaConfig();
+    if (!config.variablePick) return config.pickCount;
+    const min = Number(config.pickMin ?? 1);
+    const max = Number(config.pickMax ?? config.max);
+    return clamp(Number(rngArenaState?.pickCount || config.pickCount), min, max);
+}
+
+function getRngArenaSecondaryPickCount() {
+    const config = getRngArenaConfig();
+    if (!config.secondary) return 0;
+    if (!config.secondary.variablePick) return config.secondary.pickCount;
+    const min = Number(config.secondary.pickMin ?? config.secondary.pickCount);
+    const max = Number(config.secondary.pickMax ?? config.secondary.max);
+    return clamp(
+        Number(rngArenaState?.secondaryPickCount || config.secondary.pickCount),
+        min,
+        max
+    );
+}
+
+function getRngArenaMainResultDenominator(config = getRngArenaConfig()) {
+    return config.perfectMode === "draw" ? config.drawCount : getRngArenaPickCount();
+}
+
+function getRngArenaSecondaryResultDenominator(config = getRngArenaConfig()) {
+    if (!config.secondary) return 0;
+    return config.secondary.perfectMode === "draw"
+        ? config.secondary.drawCount
+        : getRngArenaSecondaryPickCount();
+}
+
+function getRngArenaActiveCompetitorEntries() {
+    if (!rngArenaState) return [];
+    return Object.entries(rngArenaState.competitors)
+        .filter(([key]) => key !== "user2" || rngArenaState.user2Enabled);
+}
+
+function parseRngArenaNumbers(raw, count, max, label) {
+    const values = String(raw || "")
+        .split(/[\s,;|]+/)
+        .map(value => Number(value.trim()))
+        .filter(value => Number.isFinite(value));
+
+    if (values.length !== count) {
+        throw new Error(`${label}: wpisz dokładnie ${count} ${count === 1 ? "liczbę" : "liczb"}.`);
+    }
+    if (values.some(value => !Number.isInteger(value) || value < 1 || value > max)) {
+        throw new Error(`${label}: wszystkie liczby muszą być całkowite z zakresu 1–${max}.`);
+    }
+    if (new Set(values).size !== values.length) {
+        throw new Error(`${label}: liczby nie mogą się powtarzać.`);
+    }
+
+    return values.sort((a, b) => a - b);
+}
+
+function getRngArenaInputTicket(prefix, config, pickCount) {
+    const main = parseRngArenaNumbers(
+        document.getElementById(`${prefix}Main`)?.value,
+        pickCount,
+        config.max,
+        prefix === "rngArenaMe" ? "Moje typy" : "Dodatkowy użytkownik"
+    );
+
+    let secondary = [];
+    if (config.secondary) {
+        secondary = parseRngArenaNumbers(
+            document.getElementById(`${prefix}Secondary`)?.value,
+            getRngArenaSecondaryPickCount(),
+            config.secondary.max,
+            prefix === "rngArenaMe" ? "Moje typy dodatkowe" : "Typy dodatkowego użytkownika"
+        );
+    }
+
+    return { main, secondary };
+}
+
+function rngArenaGenerateQuickPick(render = true) {
+    const config = getRngArenaConfig();
+    const pickCount = getRngArenaPickCount();
+    const competitor = rngArenaState.competitors.rng;
+    competitor.ticket = cryptoSampleUnique(pickCount, config.max);
+    competitor.secondary = config.secondary
+        ? cryptoSampleUnique(getRngArenaSecondaryPickCount(), config.secondary.max)
+        : [];
+
+    if (render) renderRngArenaQuickPick();
+}
+
+function renderRngArenaQuickPick() {
+    const competitor = rngArenaState?.competitors?.rng;
+    if (!competitor) return;
+    const main = document.getElementById("rngArenaRngMain");
+    const secondary = document.getElementById("rngArenaRngSecondary");
+    if (main) main.innerHTML = renderRngArenaBalls(competitor.ticket, "rng");
+    if (secondary) secondary.innerHTML = renderRngArenaBalls(competitor.secondary, "secondary");
+}
+
+function renderRngArenaBalls(numbers = [], variant = "main", matched = new Set()) {
+    if (!numbers.length) return `<span class="rng-arena-empty-balls">—</span>`;
+    return numbers.map(number => `
+        <span class="rng-arena-ball ${variant} ${matched.has(number) ? "hit" : ""}">${String(number).padStart(2, "0")}</span>
+    `).join("");
+}
+
+function getRngArenaHits(ticket, draw) {
+    const drawSet = new Set(draw);
+    return ticket.filter(number => drawSet.has(number)).length;
+}
+
+function getRngArenaRoundScore(mainHits, secondaryHits) {
+    // Najpierw liczą się trafienia główne. Dodatkowe rozstrzygają remis.
+    return mainHits * 10 + secondaryHits;
+}
+
+function getRngArenaSignature(mainHits, secondaryHits, config) {
+    return config.secondary ? `${mainHits}+${secondaryHits}` : String(mainHits);
+}
+
+function isRngArenaPerfect(mainHits, secondaryHits, config, pickCount) {
+    const mainTarget = config.perfectMode === "draw" ? config.drawCount : pickCount;
+    const secondaryTarget = !config.secondary
+        ? 0
+        : (config.secondary.perfectMode === "draw"
+            ? config.secondary.drawCount
+            : getRngArenaSecondaryPickCount());
+    const mainPerfect = mainHits === mainTarget;
+    const secondaryPerfect = !config.secondary || secondaryHits === secondaryTarget;
+    return mainPerfect && secondaryPerfect;
+}
+
+function resetRngArenaStats(keepTickets = true) {
+    stopRngArena();
+    if (!rngArenaState) return;
+
+    rngArenaState.rounds = 0;
+    rngArenaState.ties = 0;
+    rngArenaState.firstPerfect = null;
+    rngArenaState.lastWinEvent = null;
+    rngArenaState.lastDraw = [];
+    rngArenaState.lastSecondaryDraw = [];
+    rngArenaState.sessionCompleted = false;
+    rngArenaState.sessionSummary = null;
+    rngArenaState.timerEndAt = null;
+    rngArenaState.remainingMs = Number(rngArenaState.durationMinutes || 0) > 0
+        ? getRngArenaDurationMs()
+        : Infinity;
+
+    Object.values(rngArenaState.competitors).forEach(competitor => {
+        competitor.wins = 0;
+        competitor.bestMain = 0;
+        competitor.bestSecondary = 0;
+        competitor.perfects = 0;
+        competitor.hitCounts = {};
+        competitor.lastMainHits = 0;
+        competitor.lastSecondaryHits = 0;
+        competitor.spent = 0;
+        competitor.won = 0;
+        competitor.lastPrize = 0;
+        if (!keepTickets) {
+            competitor.ticket = [];
+            competitor.secondary = [];
+        }
+    });
+
+    renderRngArenaLive();
+}
+
+function prepareRngArenaTickets() {
+    const config = getRngArenaConfig();
+    const pickCount = getRngArenaPickCount();
+    const me = getRngArenaInputTicket("rngArenaMe", config, pickCount);
+
+    rngArenaState.competitors.me.ticket = me.main;
+    rngArenaState.competitors.me.secondary = me.secondary;
+
+    if (rngArenaState.user2Enabled) {
+        const user2 = getRngArenaInputTicket("rngArenaUser2", config, pickCount);
+        rngArenaState.competitors.user2.ticket = user2.main;
+        rngArenaState.competitors.user2.secondary = user2.secondary;
+    }
+
+    // To tylko podgląd przed startem. W każdej rundzie RNG dostaje nowy kupon.
+    if (rngArenaState.competitors.rng.ticket.length !== pickCount) {
+        rngArenaGenerateQuickPick(false);
+    }
+    if (config.secondary && rngArenaState.competitors.rng.secondary.length !== getRngArenaSecondaryPickCount()) {
+        rngArenaGenerateQuickPick(false);
+    }
+}
+
+function runRngArenaRound() {
+    const config = getRngArenaConfig();
+    const pickCount = getRngArenaPickCount();
+
+    // Każda runda dostaje NOWY, niezależny kupon Chybił-Trafił.
+    // Dzięki temu Arena symuluje prawdziwe „za każdym razem nowy zestaw RNG”.
+    rngArenaGenerateQuickPick(false);
+
+    const draw = cryptoSampleUnique(config.drawCount, config.max);
+    const secondaryDraw = config.secondary
+        ? cryptoSampleUnique(config.secondary.drawCount, config.secondary.max)
+        : [];
+
+    rngArenaState.rounds++;
+    rngArenaState.lastDraw = draw;
+    rngArenaState.lastSecondaryDraw = secondaryDraw;
+
+    const results = [];
+    let strongestWinEvent = null;
+    for (const [key, competitor] of getRngArenaActiveCompetitorEntries()) {
+        const mainHits = getRngArenaHits(competitor.ticket, draw);
+        const secondaryHits = config.secondary
+            ? getRngArenaHits(competitor.secondary, secondaryDraw)
+            : 0;
+        competitor.lastMainHits = mainHits;
+        competitor.lastSecondaryHits = secondaryHits;
+
+        // Każdy aktywny zawodnik kupuje jeden kupon/system na każdą wirtualną rundę.
+        // Systemy liczymy jak realny zestaw zakładów prostych, a nie jak jeden tani kupon.
+        const roundCost = getRngArenaTicketCost(
+            rngArenaState.gameKey,
+            pickCount,
+            getRngArenaSecondaryPickCount()
+        );
+        const roundPrize = getRngArenaRoundPrize(
+            rngArenaState.gameKey,
+            mainHits,
+            secondaryHits,
+            pickCount,
+            getRngArenaSecondaryPickCount()
+        );
+        competitor.spent += roundCost;
+        competitor.won += roundPrize;
+        competitor.lastPrize = roundPrize;
+
+        const signature = getRngArenaSignature(mainHits, secondaryHits, config);
+        competitor.hitCounts[signature] = (competitor.hitCounts[signature] || 0) + 1;
+
+        if (
+            mainHits > competitor.bestMain ||
+            (mainHits === competitor.bestMain && secondaryHits > competitor.bestSecondary)
+        ) {
+            competitor.bestMain = mainHits;
+            competitor.bestSecondary = secondaryHits;
+        }
+
+        if (isRngArenaPerfect(mainHits, secondaryHits, config, pickCount)) {
+            competitor.perfects++;
+            if (!rngArenaState.firstPerfect) {
+                rngArenaState.firstPerfect = {
+                    key,
+                    label: competitor.label,
+                    round: rngArenaState.rounds
+                };
+            }
+        }
+
+        const sound = getRngArenaWinSound(rngArenaState.gameKey, mainHits, secondaryHits, pickCount);
+        if (sound) {
+            strongestWinEvent = pickStrongerRngArenaSound(strongestWinEvent, {
+                ...sound,
+                key,
+                competitorLabel: competitor.label,
+                round: rngArenaState.rounds
+            });
+        }
+
+        results.push({
+            key,
+            score: getRngArenaRoundScore(mainHits, secondaryHits),
+            mainHits,
+            secondaryHits
+        });
+    }
+
+    const bestScore = Math.max(...results.map(result => result.score));
+    const winners = results.filter(result => result.score === bestScore);
+    if (winners.length === 1) {
+        rngArenaState.competitors[winners[0].key].wins++;
+    } else {
+        rngArenaState.ties++;
+    }
+
+    return strongestWinEvent;
+}
+
+function buildRngArenaSessionSummary() {
+    if (!rngArenaState) return null;
+    const config = getRngArenaConfig();
+    const entries = getRngArenaActiveCompetitorEntries();
+    if (!entries.length) return null;
+
+    const rows = entries.map(([key, competitor]) => {
+        const balance = competitor.won - competitor.spent;
+        const returnPercent = competitor.spent > 0 ? (competitor.won / competitor.spent) * 100 : 0;
+        const best = config.secondary
+            ? `${competitor.bestMain}/${getRngArenaMainResultDenominator(config)} + ${competitor.bestSecondary}/${getRngArenaSecondaryResultDenominator(config)}`
+            : `${competitor.bestMain}/${getRngArenaMainResultDenominator(config)}`;
+        return {
+            key,
+            label: competitor.label,
+            wins: competitor.wins,
+            perfects: competitor.perfects,
+            best,
+            spent: competitor.spent,
+            won: competitor.won,
+            balance,
+            returnPercent
+        };
+    });
+
+    const maxWins = Math.max(...rows.map(row => row.wins));
+    const arenaWinners = rows.filter(row => row.wins === maxWins);
+    const maxBalance = Math.max(...rows.map(row => row.balance));
+    const financeWinners = rows.filter(row => row.balance === maxBalance);
+
+    const rngRow = rows.find(row => row.key === "rng");
+    const meRow = rows.find(row => row.key === "me");
+    let duelText = "";
+    if (rngRow && meRow) {
+        if (meRow.wins > rngRow.wins) {
+            duelText = `👤 Twoje typy pokonały RNG o ${(meRow.wins - rngRow.wins).toLocaleString("pl-PL")} wygranych rund.`;
+        } else if (rngRow.wins > meRow.wins) {
+            duelText = `🎲 RNG pokonał Twoje typy o ${(rngRow.wins - meRow.wins).toLocaleString("pl-PL")} wygranych rund.`;
+        } else {
+            duelText = `🤝 RNG i Twoje typy zakończyły sesję remisem: ${meRow.wins.toLocaleString("pl-PL")} wygranych rund.`;
+        }
+    }
+
+    return {
+        rounds: rngArenaState.rounds,
+        ties: rngArenaState.ties,
+        durationMinutes: Number(rngArenaState.durationMinutes || 0),
+        endedAt: new Date().toISOString(),
+        rows,
+        arenaWinners: arenaWinners.map(row => row.label),
+        arenaWinnerWins: maxWins,
+        financeWinners: financeWinners.map(row => row.label),
+        financeWinnerBalance: maxBalance,
+        duelText
+    };
+}
+
+function finishRngArenaTimedSession() {
+    if (!rngArenaState || rngArenaState.sessionCompleted) return;
+    stopRngArena();
+    rngArenaState.remainingMs = 0;
+    rngArenaState.timerEndAt = null;
+    rngArenaState.sessionCompleted = true;
+    rngArenaState.sessionSummary = buildRngArenaSessionSummary();
+    if (rngArenaState.soundEnabled) playRngArenaSound("big");
+    renderRngArenaLive();
+}
+
+function renderRngArenaSessionSummary() {
+    const summary = rngArenaState?.sessionSummary;
+    if (!summary) return "";
+    const arenaWinnerText = summary.arenaWinners.length === 1
+        ? summary.arenaWinners[0]
+        : `REMIS: ${summary.arenaWinners.join(" + ")}`;
+    const financeWinnerText = summary.financeWinners.length === 1
+        ? summary.financeWinners[0]
+        : `REMIS: ${summary.financeWinners.join(" + ")}`;
+
+    const rows = summary.rows.map(row => {
+        const balanceClass = row.balance > 0 ? "positive" : row.balance < 0 ? "negative" : "neutral";
+        return `
+            <article class="rng-arena-summary-player ${row.key}">
+                <strong>${row.label}</strong>
+                <div><span>Wygrane rundy</span><b>${row.wins.toLocaleString("pl-PL")}</b></div>
+                <div><span>Najlepszy wynik</span><b>${row.best}</b></div>
+                <div><span>Pełne trafienia</span><b>${row.perfects.toLocaleString("pl-PL")}</b></div>
+                <div><span>Wydane</span><b>${formatRngArenaMoney(row.spent)}</b></div>
+                <div><span>Wygrane</span><b>${formatRngArenaMoney(row.won)}</b></div>
+                <div class="${balanceClass}"><span>Bilans</span><b>${row.balance > 0 ? "+" : ""}${formatRngArenaMoney(row.balance)}</b></div>
+                <div><span>Zwrot</span><b>${row.returnPercent.toLocaleString("pl-PL", { maximumFractionDigits: 2 })}%</b></div>
+            </article>
+        `;
+    }).join("");
+
+    return `
+        <section class="rng-arena-session-summary">
+            <div class="rng-arena-session-summary-head">
+                <div>
+                    <span>⏱️ SESJA CZASOWA ZAKOŃCZONA</span>
+                    <strong>${summary.durationMinutes} min • ${summary.rounds.toLocaleString("pl-PL")} rund</strong>
+                </div>
+                <b>Automatyczny STOP</b>
+            </div>
+            <div class="rng-arena-summary-winners">
+                <div><span>🏁 Zwycięzca zawodów</span><strong>${arenaWinnerText}</strong><small>${summary.arenaWinnerWins.toLocaleString("pl-PL")} wygranych rund</small></div>
+                <div><span>💰 Najlepszy bilans</span><strong>${financeWinnerText}</strong><small>${summary.financeWinnerBalance > 0 ? "+" : ""}${formatRngArenaMoney(summary.financeWinnerBalance)}</small></div>
+            </div>
+            ${summary.duelText ? `<div class="rng-arena-summary-duel">${summary.duelText}</div>` : ""}
+            <div class="rng-arena-summary-grid">${rows}</div>
+        </section>
+    `;
+}
+
+function runRngArenaBatch(amount) {
+    let strongestWinEvent = null;
+    for (let i = 0; i < amount; i++) {
+        strongestWinEvent = pickStrongerRngArenaSound(strongestWinEvent, runRngArenaRound());
+    }
+    // Przy 10/100/1000 losowaniach na sekundę nie gramy setek dźwięków naraz.
+    // Odtwarzamy jeden — najmocniejsze trafienie z całej paczki.
+    if (strongestWinEvent) triggerRngArenaWinEvent(strongestWinEvent);
+    renderRngArenaLive();
+}
+
+function startRngArena() {
+    try {
+        ensureRngArenaAudio();
+
+        // START po zakończonej sesji czasowej rozpoczyna świeży wyścig,
+        // ale zostawia wpisane kupony użytkowników.
+        if (
+            rngArenaState.sessionCompleted &&
+            Number(rngArenaState.durationMinutes || 0) > 0 &&
+            Number(rngArenaState.remainingMs || 0) <= 0
+        ) {
+            resetRngArenaStats(true);
+        }
+
+        prepareRngArenaTickets();
+        stopRngArena();
+        const speed = clamp(Number(document.getElementById("rngArenaSpeed")?.value || 1), 1, 1000);
+        rngArenaState.speed = speed;
+
+        const durationMs = getRngArenaDurationMs();
+        if (durationMs > 0) {
+            if (!Number.isFinite(rngArenaState.remainingMs) || rngArenaState.remainingMs <= 0) {
+                rngArenaState.remainingMs = durationMs;
+            }
+            rngArenaState.timerEndAt = Date.now() + rngArenaState.remainingMs;
+        } else {
+            rngArenaState.remainingMs = Infinity;
+            rngArenaState.timerEndAt = null;
+        }
+
+        rngArenaState.running = true;
+        rngArenaState.sessionCompleted = false;
+        rngArenaState.sessionSummary = null;
+
+        // UI odświeżamy raz na sekundę, a w środku możemy policzyć 1/10/100/1000 rund.
+        rngArenaTimer = setInterval(() => {
+            if (!document.getElementById("rngArenaRoot")) {
+                stopRngArena();
+                return;
+            }
+
+            if (Number(rngArenaState.durationMinutes || 0) > 0) {
+                syncRngArenaRemainingTime();
+                if (rngArenaState.remainingMs <= 0) {
+                    finishRngArenaTimedSession();
+                    return;
+                }
+            }
+
+            runRngArenaBatch(rngArenaState.speed);
+
+            if (Number(rngArenaState.durationMinutes || 0) > 0) {
+                syncRngArenaRemainingTime();
+                if (rngArenaState.remainingMs <= 0) {
+                    finishRngArenaTimedSession();
+                }
+            }
+        }, 1000);
+        renderRngArenaLive();
+    } catch (error) {
+        console.error("RNG Arena:", error);
+        alert(`❌ Nie mogę wystartować zawodów.\n\n${error.message}`);
+    }
+}
+
+function pauseRngArena() {
+    stopRngArena();
+    renderRngArenaLive();
+}
+
+function getRngArenaSortedHitRows(competitor, config) {
+    return Object.entries(competitor.hitCounts)
+        .sort((a, b) => {
+            const parse = value => value.split("+").map(Number);
+            const [am, as = 0] = parse(a[0]);
+            const [bm, bs = 0] = parse(b[0]);
+            return bm - am || bs - as;
+        })
+        .slice(0, 8)
+        .map(([signature, count]) => {
+            if (!config.secondary) {
+                return `${signature}/${getRngArenaMainResultDenominator(config)} → ${count.toLocaleString("pl-PL")}`;
+            }
+            const [mainHits, secondaryHits = 0] = signature.split("+").map(Number);
+            return `${mainHits}/${getRngArenaMainResultDenominator(config)} + ${secondaryHits}/${getRngArenaSecondaryResultDenominator(config)} → ${count.toLocaleString("pl-PL")}`;
+        })
+        .join(" • ") || "—";
+}
+
+function renderRngArenaCompetitorCard(key, competitor, config) {
+    const drawSet = new Set(rngArenaState.lastDraw || []);
+    const secondarySet = new Set(rngArenaState.lastSecondaryDraw || []);
+    const mainDenominator = getRngArenaMainResultDenominator(config);
+    const secondaryDenominator = getRngArenaSecondaryResultDenominator(config);
+    const bestText = config.secondary
+        ? `${competitor.bestMain}/${mainDenominator} + ${competitor.bestSecondary}/${secondaryDenominator}`
+        : `${competitor.bestMain}/${mainDenominator}`;
+    const lastText = config.secondary
+        ? `${competitor.lastMainHits}/${mainDenominator} + ${competitor.lastSecondaryHits}/${secondaryDenominator}`
+        : `${competitor.lastMainHits}/${mainDenominator}`;
+
+    const balance = competitor.won - competitor.spent;
+    const returnPercent = competitor.spent > 0
+        ? (competitor.won / competitor.spent) * 100
+        : 0;
+    const balanceClass = balance > 0 ? "positive" : balance < 0 ? "negative" : "neutral";
+
+    return `
+        <article class="rng-arena-player ${key}">
+            <div class="rng-arena-player-head">
+                <strong>${competitor.label}</strong>
+                <span>ostatnio: ${lastText}</span>
+            </div>
+            <div class="rng-arena-player-balls">${renderRngArenaBalls(competitor.ticket, key === "rng" ? "rng" : "main", drawSet)}</div>
+            ${config.secondary ? `<div class="rng-arena-player-balls secondary-row">${renderRngArenaBalls(competitor.secondary, "secondary", secondarySet)}</div>` : ""}
+            <div class="rng-arena-player-stats">
+                <div><span>Wygrane rundy</span><strong>${competitor.wins.toLocaleString("pl-PL")}</strong></div>
+                <div><span>Najlepszy wynik</span><strong>${bestText}</strong></div>
+                <div><span>Pełne trafienia</span><strong>${competitor.perfects.toLocaleString("pl-PL")}</strong></div>
+            </div>
+
+            <div class="rng-arena-finance-grid">
+                <div class="spent"><span>💸 Wydane</span><strong>${formatRngArenaMoney(competitor.spent)}</strong></div>
+                <div class="won"><span>💰 Wygrane</span><strong>${formatRngArenaMoney(competitor.won)}</strong></div>
+                <div class="balance ${balanceClass}"><span>📊 Bilans</span><strong>${balance > 0 ? "+" : ""}${formatRngArenaMoney(balance)}</strong></div>
+                <div class="last-prize"><span>🎯 Ostatnia wygrana</span><strong>${formatRngArenaMoney(competitor.lastPrize)}</strong></div>
+                <div class="return"><span>↩ Zwrot</span><strong>${returnPercent.toLocaleString("pl-PL", { maximumFractionDigits: 2 })}%</strong></div>
+            </div>
+
+            <small class="rng-arena-hitlog">${getRngArenaSortedHitRows(competitor, config)}</small>
+        </article>
+    `;
+}
+
+function renderRngArenaLive() {
+    if (!rngArenaState || !document.getElementById("rngArenaRoot")) return;
+    const config = getRngArenaConfig();
+    const status = document.getElementById("rngArenaStatus");
+    const draw = document.getElementById("rngArenaDraw");
+    const secondaryDraw = document.getElementById("rngArenaSecondaryDraw");
+    const players = document.getElementById("rngArenaPlayers");
+    const firstPerfect = document.getElementById("rngArenaFirstPerfect");
+    const winAlert = document.getElementById("rngArenaWinAlert");
+    const financeInfo = document.getElementById("rngArenaFinanceInfo");
+    const sessionSummaryHost = document.getElementById("rngArenaSessionSummary");
+
+    if (status) {
+        status.innerHTML = `
+            <div><span>Rundy</span><strong>${rngArenaState.rounds.toLocaleString("pl-PL")}</strong></div>
+            <div><span>Tempo</span><strong>${rngArenaState.speed.toLocaleString("pl-PL")}/s</strong></div>
+            <div><span>Remisy</span><strong>${rngArenaState.ties.toLocaleString("pl-PL")}</strong></div>
+            <div><span>Koszt / gracza / rundę</span><strong>${formatRngArenaMoney(getRngArenaTicketCost())}</strong></div>
+            <div class="rng-arena-clock-stat"><span>⏱️ Pozostało</span><strong>${formatRngArenaClock(syncRngArenaRemainingTime())}</strong></div>
+            <div><span>Status</span><strong class="${rngArenaState.running ? "running" : "paused"}">${rngArenaState.running ? "● DZIAŁA" : (rngArenaState.sessionCompleted ? "■ KONIEC SESJI" : "■ PAUZA")}</strong></div>
+        `;
+    }
+
+    if (sessionSummaryHost) {
+        sessionSummaryHost.innerHTML = renderRngArenaSessionSummary();
+    }
+
+    if (financeInfo) {
+        const info = getRngArenaFinanceInfo();
+        financeInfo.innerHTML = `
+            <div class="rng-arena-finance-price">
+                <span>💳 REALNY KOSZT JEDNEJ WIRTUALNEJ RUNDY / GRACZA</span>
+                <strong>${formatRngArenaMoney(info.cost)}</strong>
+                <small>${info.comboText}</small>
+            </div>
+            <div class="rng-arena-finance-model">
+                <span>MODEL WYPŁAT • ${RNG_ARENA_FINANCE_MODEL.modelDate}</span>
+                <strong>${info.modelLabel}</strong>
+                <small>${info.note}</small>
+            </div>
+        `;
+    }
+
+    // Podgląd RNG pokazuje zawsze kupon użyty w ostatniej przeliczonej rundzie.
+    renderRngArenaQuickPick();
+
+    if (draw) draw.innerHTML = renderRngArenaBalls(rngArenaState.lastDraw, "draw");
+    if (secondaryDraw) secondaryDraw.innerHTML = config.secondary
+        ? renderRngArenaBalls(rngArenaState.lastSecondaryDraw, "secondary")
+        : "";
+    if (players) {
+        players.classList.toggle("two-players", !rngArenaState.user2Enabled);
+        players.innerHTML = getRngArenaActiveCompetitorEntries()
+            .map(([key, competitor]) => renderRngArenaCompetitorCard(key, competitor, config))
+            .join("");
+    }
+
+    const setup = document.querySelector(".rng-arena-ticket-setup");
+    const user2Setup = document.getElementById("rngArenaUser2Setup");
+    const user2Toggle = document.getElementById("rngArenaUser2Enabled");
+    const soundToggle = document.getElementById("rngArenaSoundEnabled");
+    if (setup) setup.classList.toggle("two-players", !rngArenaState.user2Enabled);
+    if (user2Setup) user2Setup.classList.toggle("user2-disabled", !rngArenaState.user2Enabled);
+    if (user2Toggle) user2Toggle.checked = rngArenaState.user2Enabled;
+    if (firstPerfect) {
+        firstPerfect.innerHTML = rngArenaState.firstPerfect
+            ? `🏆 Pierwsze pełne trafienie: <strong>${rngArenaState.firstPerfect.label}</strong> w rundzie <strong>#${rngArenaState.firstPerfect.round.toLocaleString("pl-PL")}</strong>`
+            : "🏁 Wyścig trwa: kto pierwszy zaliczy pełne trafienie?";
+    }
+
+    if (winAlert) {
+        const event = rngArenaState.lastWinEvent;
+        if (!event) {
+            winAlert.className = "rng-arena-win-alert empty";
+            winAlert.innerHTML = "🔈 Dźwięk odezwie się, gdy któryś zawodnik zaliczy poziom wygranej.";
+        } else {
+            const icon = event.tier === "epic" ? "🏆" : event.tier === "big" ? "🔥" : "🔔";
+            winAlert.className = `rng-arena-win-alert ${event.tier}`;
+            winAlert.innerHTML = `${icon} <strong>${event.competitorLabel}</strong> — ${event.result} • ${event.label} <small>runda #${Number(event.atRound || event.round || 0).toLocaleString("pl-PL")}</small>`;
+        }
+    }
+
+    const startBtn = document.getElementById("rngArenaStartBtn");
+    const pauseBtn = document.getElementById("rngArenaPauseBtn");
+    if (startBtn) startBtn.disabled = rngArenaState.running;
+    if (pauseBtn) pauseBtn.disabled = !rngArenaState.running;
+}
+
+function bindRngArenaEvents() {
+    const gameSelect = document.getElementById("rngArenaGame");
+    const pickSelect = document.getElementById("rngArenaPickCount");
+    const secondaryPickSelect = document.getElementById("rngArenaSecondaryPickCount");
+    const speedSelect = document.getElementById("rngArenaSpeed");
+    const durationSelect = document.getElementById("rngArenaDuration");
+    const user2Toggle = document.getElementById("rngArenaUser2Enabled");
+    const soundToggle = document.getElementById("rngArenaSoundEnabled");
+
+    gameSelect?.addEventListener("change", () => showRngArena(gameSelect.value));
+    pickSelect?.addEventListener("change", () => {
+        const gameKey = rngArenaState.gameKey;
+        showRngArena(gameKey, Number(pickSelect.value), getRngArenaSecondaryPickCount());
+    });
+    secondaryPickSelect?.addEventListener("change", () => {
+        const gameKey = rngArenaState.gameKey;
+        showRngArena(gameKey, getRngArenaPickCount(), Number(secondaryPickSelect.value));
+    });
+    speedSelect?.addEventListener("change", () => {
+        rngArenaState.speed = clamp(Number(speedSelect.value || 1), 1, 1000);
+        if (rngArenaState.running) startRngArena();
+        else renderRngArenaLive();
+    });
+
+    durationSelect?.addEventListener("change", () => {
+        stopRngArena();
+        rngArenaState.durationMinutes = Math.max(0, Number(durationSelect.value || 0));
+        // Zmiana długości sesji rozpoczyna nowy, uczciwy pomiar od zera.
+        resetRngArenaStats(true);
+    });
+
+    user2Toggle?.addEventListener("change", () => {
+        // Zmieniamy skład zawodów, więc zerujemy ranking, żeby porównanie było uczciwe.
+        stopRngArena();
+        rngArenaState.user2Enabled = user2Toggle.checked;
+        resetRngArenaStats(true);
+    });
+
+    soundToggle?.addEventListener("change", () => {
+        rngArenaState.soundEnabled = soundToggle.checked;
+        if (rngArenaState.soundEnabled) {
+            ensureRngArenaAudio();
+            playRngArenaSound("alert");
+        }
+    });
+
+    document.getElementById("rngArenaStartBtn")?.addEventListener("click", startRngArena);
+    document.getElementById("rngArenaPauseBtn")?.addEventListener("click", pauseRngArena);
+    document.getElementById("rngArenaStepBtn")?.addEventListener("click", () => {
+        try {
+            ensureRngArenaAudio();
+            prepareRngArenaTickets();
+            runRngArenaBatch(1);
+        } catch (error) {
+            alert(`❌ ${error.message}`);
+        }
+    });
+    document.getElementById("rngArenaResetBtn")?.addEventListener("click", () => resetRngArenaStats(true));
+    document.getElementById("rngArenaSoundTestBtn")?.addEventListener("click", () => {
+        ensureRngArenaAudio();
+        playRngArenaSound("epic");
+    });
+}
+
+function showRngArena(gameKey = null, forcedPickCount = null, forcedSecondaryPickCount = null) {
+    stopRngArena();
+    const resolvedKey = RNG_ARENA_GAME_CONFIG[gameKey] ? gameKey : getCurrentGameKey();
+    const previous = rngArenaState;
+    const config = RNG_ARENA_GAME_CONFIG[resolvedKey];
+    const previousPickCount = previous?.gameKey === resolvedKey
+        ? Number(previous.pickCount || config.pickCount)
+        : config.pickCount;
+    const pickMin = Number(config.pickMin ?? config.pickCount);
+    const pickMax = Number(config.pickMax ?? config.pickCount);
+    const pickCount = config.variablePick
+        ? clamp(Number(forcedPickCount ?? previousPickCount), pickMin, pickMax)
+        : config.pickCount;
+
+    const secondaryDefault = config.secondary?.pickCount || 0;
+    const previousSecondaryPickCount = previous?.gameKey === resolvedKey
+        ? Number(previous.secondaryPickCount || secondaryDefault)
+        : secondaryDefault;
+    const secondaryPickMin = Number(config.secondary?.pickMin ?? secondaryDefault);
+    const secondaryPickMax = Number(config.secondary?.pickMax ?? secondaryDefault);
+    const secondaryPickCount = config.secondary?.variablePick
+        ? clamp(Number(forcedSecondaryPickCount ?? previousSecondaryPickCount), secondaryPickMin, secondaryPickMax)
+        : secondaryDefault;
+
+    rngArenaState = createRngArenaState(resolvedKey);
+    rngArenaState.pickCount = pickCount;
+    rngArenaState.secondaryPickCount = secondaryPickCount;
+    rngArenaState.speed = previous?.speed || 1;
+    rngArenaState.user2Enabled = previous ? previous.user2Enabled !== false : true;
+    rngArenaState.soundEnabled = previous ? previous.soundEnabled !== false : true;
+    rngArenaState.durationMinutes = previous ? Math.max(0, Number(previous.durationMinutes ?? 60)) : 60;
+    rngArenaState.remainingMs = rngArenaState.durationMinutes > 0
+        ? rngArenaState.durationMinutes * 60 * 1000
+        : Infinity;
+    rngArenaGenerateQuickPick(false);
+
+    contentArea.classList.remove("stats-view", "lab-view");
+    contentArea.classList.add("rng-arena-view");
+    contentArea.innerHTML = `
+        <div id="rngArenaRoot" class="rng-arena-root">
+            <div class="rng-arena-hero">
+                <div>
+                    <span class="rng-arena-kicker">LOTTOFORGE • WEB CRYPTO</span>
+                    <h1>⚡ Every Second — RNG Arena</h1>
+                    <p>Jedno wspólne wirtualne losowanie. RNG kontra Twoje typy — opcjonalnie także drugi gracz.</p>
+                </div>
+                <div class="rng-arena-controls-grid">
+                    <label>Gra
+                        <select id="rngArenaGame">
+                            ${Object.entries(RNG_ARENA_GAME_CONFIG).map(([key, item]) => `<option value="${key}" ${key === resolvedKey ? "selected" : ""}>${item.label}</option>`).join("")}
+                        </select>
+                    </label>
+                    ${config.variablePick ? `<label>${config.systemMode ? "System — liczby główne" : "Ile liczb typuje każdy?"}
+                        <select id="rngArenaPickCount">
+                            ${Array.from({ length: (config.pickMax - config.pickMin + 1) }, (_, index) => config.pickMin + index).map(value => `<option value="${value}" ${value === pickCount ? "selected" : ""}>${value}${config.systemMode ? (value === config.drawCount ? " — zwykły zakład" : " — system") : ""}</option>`).join("")}
+                        </select>
+                    </label>` : ""}
+                    ${config.secondary?.variablePick ? `<label>System — liczby ${config.secondary.label}
+                        <select id="rngArenaSecondaryPickCount">
+                            ${Array.from({ length: (config.secondary.pickMax - config.secondary.pickMin + 1) }, (_, index) => config.secondary.pickMin + index).map(value => `<option value="${value}" ${value === secondaryPickCount ? "selected" : ""}>${value}${value === config.secondary.drawCount ? " — zwykły zakład" : " — system"}</option>`).join("")}
+                        </select>
+                    </label>` : ""}
+                    <label>Tempo symulacji
+                        <select id="rngArenaSpeed">
+                            ${[1,10,100,1000].map(value => `<option value="${value}" ${value === rngArenaState.speed ? "selected" : ""}>${value.toLocaleString("pl-PL")} los./s</option>`).join("")}
+                        </select>
+                    </label>
+                    <label>Czas sesji
+                        <select id="rngArenaDuration">
+                            ${[
+                                [0, "Bez limitu"],
+                                [1, "1 minuta"],
+                                [5, "5 minut"],
+                                [10, "10 minut"],
+                                [15, "15 minut"],
+                                [30, "30 minut"],
+                                [60, "60 minut"],
+                                [120, "120 minut"]
+                            ].map(([value, label]) => `<option value="${value}" ${Number(value) === Number(rngArenaState.durationMinutes) ? "selected" : ""}>${label}</option>`).join("")}
+                        </select>
+                    </label>
+                    <label class="rng-arena-toggle-control">Dodatkowy gracz
+                        <span class="rng-arena-toggle-line">
+                            <input id="rngArenaUser2Enabled" type="checkbox" ${rngArenaState.user2Enabled ? "checked" : ""}>
+                            <strong>Uwzględnij w zawodach</strong>
+                        </span>
+                    </label>
+                    <label class="rng-arena-toggle-control">Dźwięki wygranych
+                        <span class="rng-arena-toggle-line">
+                            <input id="rngArenaSoundEnabled" type="checkbox" ${rngArenaState.soundEnabled ? "checked" : ""}>
+                            <strong>🔊 Alert / Big / EPIC</strong>
+                        </span>
+                    </label>
+                </div>
+            </div>
+
+            <section class="rng-arena-ticket-setup">
+                <article class="rng-arena-setup-card rng">
+                    <div class="rng-arena-setup-head"><strong>🎲 RNG / Chybił-Trafił</strong><span class="rng-arena-live-badge">NOWY CO RUNDĘ</span></div>
+                    <div id="rngArenaRngMain" class="rng-arena-setup-balls"></div>
+                    ${config.secondary ? `<div id="rngArenaRngSecondary" class="rng-arena-setup-balls secondary-row"></div>` : ""}
+                    <small>W każdej wirtualnej rundzie Web Crypto tworzy zupełnie nowy ${config.systemMode && pickCount > config.drawCount ? `system ${pickCount}` : "kupon RNG"}${config.secondary?.systemMode && secondaryPickCount > config.secondary.drawCount ? ` + system Euro ${secondaryPickCount}` : ""}. Tu widzisz zestaw użyty w ostatniej rundzie.</small>
+                </article>
+
+                <article class="rng-arena-setup-card">
+                    <strong>👤 Moje typy</strong>
+                    <input id="rngArenaMeMain" type="text" placeholder="${Array.from({ length: pickCount }, (_, i) => Math.min(i + 1, config.max)).join(", ")}">
+                    ${config.secondary ? `<input id="rngArenaMeSecondary" type="text" placeholder="${config.secondary.label}: ${Array.from({ length: secondaryPickCount }, (_, i) => i + 1).join(", ")}">` : ""}
+                    <small>${config.systemMode ? `System ${pickCount}: wpisz dokładnie ${pickCount} liczb z 1–${config.max}. Pełne trafienie = wszystkie ${config.drawCount} wylosowanych liczb są w systemie.` : `Dokładnie ${pickCount} ${pickCount === 1 ? "liczba" : "liczb"} z 1–${config.max}.`}${config.secondary ? ` ${config.secondary.systemMode ? `Euro system ${secondaryPickCount}: wpisz ${secondaryPickCount} liczb z 1–${config.secondary.max}; pełne = ${config.secondary.drawCount}/${config.secondary.drawCount}.` : `+ ${secondaryPickCount} z 1–${config.secondary.max}.`}` : ""}</small>
+                </article>
+
+                <article id="rngArenaUser2Setup" class="rng-arena-setup-card ${rngArenaState.user2Enabled ? "" : "user2-disabled"}">
+                    <strong>👥 Dodatkowy użytkownik</strong>
+                    <input id="rngArenaUser2Main" type="text" placeholder="${Array.from({ length: pickCount }, (_, i) => Math.max(1, config.max - pickCount + 1 + i)).join(", ")}">
+                    ${config.secondary ? `<input id="rngArenaUser2Secondary" type="text" placeholder="${config.secondary.label}: ${Array.from({ length: secondaryPickCount }, (_, i) => Math.max(1, config.secondary.max - secondaryPickCount + 1 + i)).join(", ")}">` : ""}
+                    <small>Drugi stały kupon porównywany z dokładnie tym samym losowaniem.</small>
+                </article>
+            </section>
+
+            <div class="rng-arena-actions">
+                <button id="rngArenaStartBtn" class="primary-btn">▶ START</button>
+                <button id="rngArenaPauseBtn" class="lab-secondary-btn">⏸ PAUZA</button>
+                <button id="rngArenaStepBtn" class="lab-secondary-btn">⏭ 1 LOSOWANIE</button>
+                <button id="rngArenaResetBtn" class="lab-secondary-btn">↺ RESET STATYSTYK</button>
+                <button id="rngArenaSoundTestBtn" class="lab-secondary-btn">🔊 TEST EPIC</button>
+            </div>
+
+            <section class="rng-arena-draw-card">
+                <div class="rng-arena-draw-head">
+                    <div><span>GŁÓWNE WIRTUALNE LOSOWANIE</span><strong>${config.label}</strong></div>
+                    <small>${config.drawCount} z ${config.max}${config.secondary ? ` • ${config.secondary.drawCount} z ${config.secondary.max}` : ""}${config.systemMode && pickCount > config.drawCount ? ` • SYSTEM ${pickCount}` : ""}${config.secondary?.systemMode && secondaryPickCount > config.secondary.drawCount ? ` + EURO ${secondaryPickCount}` : ""}</small>
+                </div>
+                <div id="rngArenaDraw" class="rng-arena-draw-balls"></div>
+                ${config.secondary ? `<div id="rngArenaSecondaryDraw" class="rng-arena-draw-balls secondary-row"></div>` : ""}
+            </section>
+
+            <div id="rngArenaFinanceInfo" class="rng-arena-finance-info"></div>
+            <div id="rngArenaPrizeTableHost">${renderRngArenaPrizeTable(resolvedKey, pickCount)}</div>
+            <div id="rngArenaStatus" class="rng-arena-status"></div>
+            <div id="rngArenaWinAlert" class="rng-arena-win-alert empty"></div>
+            <div id="rngArenaFirstPerfect" class="rng-arena-first-perfect"></div>
+            <div id="rngArenaSessionSummary"></div>
+            <section id="rngArenaPlayers" class="rng-arena-players ${rngArenaState.user2Enabled ? "" : "two-players"}"></section>
+
+            <div class="rng-arena-footnote">
+                <strong>Jak liczymy zawody i pieniądze?</strong> Każda wirtualna runda oznacza zakup nowego zakładu przez każdego aktywnego zawodnika. Systemy Mini/Lotto/Euro są rozbijane na wszystkie zakłady proste: koszt i wygrana sumują się dokładnie z liczby kombinacji. Multi Multi liczymy przy stawce x1 bez Plusa, Lotto bez Lotto Plus, a Ekstra Pensję bez Ekstra Premii. Kwoty zmienne w Mini/Lotto/Euro są symulowane na historycznych średnich/estymatach, więc nie są obietnicą przyszłej wypłaty. Pokazywane wygrane są kwotami brutto — symulator nie odejmuje podatku. W Ekstra Pensji 5+1 wartość 1,2 mln zł oznacza nominalnie 240 wypłat po 5 000 zł. Czasowe promocje Multi Multi nie są doliczane. Najpierw porównujemy trafienia główne; liczby dodatkowe rozstrzygają remis. Dźwięki i wyścig pełnych trafień działają tak jak wcześniej. Sesja czasowa odlicza rzeczywisty czas działania (pauza zatrzymuje zegar); po dojściu do zera Arena robi automatyczny STOP i tworzy podsumowanie zwycięzcy rund oraz najlepszego bilansu.
+            </div>
+        </div>
+    `;
+
+    renderRngArenaQuickPick();
+    bindRngArenaEvents();
+    renderRngArenaLive();
 }
