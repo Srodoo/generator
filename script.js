@@ -8751,6 +8751,652 @@ function makeRngArenaCompetitor(label) {
     };
 }
 
+// =========================================================
+// LOTTOFORGE — GOLDEN TICKET / RNG SCOUT
+// Analizuje WYŁĄCZNIE główne wirtualne losowania Areny.
+// 70% sesji = TRAIN, 30% = TEST na niewidzianych losowaniach.
+// Pary / trójki / czwórki NIE wpływają na wybór kuponu.
+// =========================================================
+const RNG_ARENA_SCOUT_TRAIN_SHARE = 0.70;
+const RNG_ARENA_SCOUT_CANDIDATE_COUNT = 24;
+
+function getRngArenaScoutRanges(gameKey = rngArenaState?.gameKey) {
+    const game = games[gameKey] || games.mini;
+    return (game.ranges || [game.max]).map((end, index, ranges) => {
+        const start = index === 0 ? 1 : ranges[index - 1] + 1;
+        return { start, end, capacity: end - start + 1 };
+    });
+}
+
+function createRngArenaScoutState(gameKey = "mini") {
+    const config = RNG_ARENA_GAME_CONFIG[gameKey] || RNG_ARENA_GAME_CONFIG.mini;
+    const ranges = getRngArenaScoutRanges(gameKey);
+    const secondaryMax = config.secondary?.max || 0;
+
+    return {
+        enabled: true,
+        phase: "idle",
+        totalObserved: 0,
+        trainRounds: 0,
+        trainEarlyRounds: 0,
+        trainLateRounds: 0,
+        testRounds: 0,
+        mainTrainCounts: new Array(config.max + 1).fill(0),
+        mainTrainEarlyCounts: new Array(config.max + 1).fill(0),
+        mainTrainLateCounts: new Array(config.max + 1).fill(0),
+        mainTestCounts: new Array(config.max + 1).fill(0),
+        secondaryTrainCounts: new Array(secondaryMax + 1).fill(0),
+        secondaryTrainEarlyCounts: new Array(secondaryMax + 1).fill(0),
+        secondaryTrainLateCounts: new Array(secondaryMax + 1).fill(0),
+        secondaryTestCounts: new Array(secondaryMax + 1).fill(0),
+        sectorTrainCounts: new Array(ranges.length).fill(0),
+        sectorTestCounts: new Array(ranges.length).fill(0),
+        structureTrainCounts: {},
+        candidates: [],
+        frozenAtRound: null,
+        finalResult: null,
+        lastProgress: 0
+    };
+}
+
+function resetRngArenaScout(keepEnabled = true) {
+    if (!rngArenaState) return;
+    const enabled = keepEnabled ? rngArenaState.scout?.enabled !== false : true;
+    rngArenaState.scout = createRngArenaScoutState(rngArenaState.gameKey);
+    rngArenaState.scout.enabled = enabled;
+}
+
+function getRngArenaScoutBatchContext() {
+    const scout = rngArenaState?.scout;
+    if (!scout?.enabled) return { phase: "disabled", progress: 0, trainSegment: "early" };
+
+    const durationMs = getRngArenaDurationMs();
+    if (durationMs > 0) {
+        const remaining = syncRngArenaRemainingTime();
+        const progress = clamp(1 - (remaining / durationMs), 0, 1);
+        const phase = progress < RNG_ARENA_SCOUT_TRAIN_SHARE ? "train" : "test";
+        const trainSegment = progress < (RNG_ARENA_SCOUT_TRAIN_SHARE / 2) ? "early" : "late";
+        scout.lastProgress = progress;
+        return { phase, progress, trainSegment };
+    }
+
+    // Bez limitu czasowego Scout pozostaje w trybie treningowym.
+    // Po 1000 rundach zaczyna traktować kolejne rundy jako „późny TRAIN”,
+    // dzięki czemu nadal potrafi pokazać kierunek zmian, ale nie udaje testu holdout.
+    const trainSegment = scout.trainRounds < 1000 ? "early" : "late";
+    return { phase: "train", progress: null, trainSegment };
+}
+
+function getRngArenaScoutStructure(numbers, gameKey = rngArenaState?.gameKey) {
+    const ranges = getRngArenaScoutRanges(gameKey);
+    const counts = new Array(ranges.length).fill(0);
+    (numbers || []).forEach(number => {
+        const index = ranges.findIndex(range => number >= range.start && number <= range.end);
+        if (index >= 0) counts[index]++;
+    });
+    return counts.join("-");
+}
+
+function getRngArenaScoutSectorIndex(number, gameKey = rngArenaState?.gameKey) {
+    return getRngArenaScoutRanges(gameKey)
+        .findIndex(range => number >= range.start && number <= range.end);
+}
+
+function updateRngArenaScoutCounter(counter, numbers) {
+    (numbers || []).forEach(number => {
+        if (Number.isInteger(number) && number >= 0 && number < counter.length) {
+            counter[number]++;
+        }
+    });
+}
+
+function observeRngArenaScoutDraw(draw, secondaryDraw, context) {
+    const scout = rngArenaState?.scout;
+    if (!scout?.enabled || context?.phase === "disabled") return;
+
+    scout.totalObserved++;
+    scout.phase = context.phase;
+
+    if (context.phase === "train") {
+        scout.trainRounds++;
+        updateRngArenaScoutCounter(scout.mainTrainCounts, draw);
+        updateRngArenaScoutCounter(scout.secondaryTrainCounts, secondaryDraw);
+
+        if (context.trainSegment === "early") {
+            scout.trainEarlyRounds++;
+            updateRngArenaScoutCounter(scout.mainTrainEarlyCounts, draw);
+            updateRngArenaScoutCounter(scout.secondaryTrainEarlyCounts, secondaryDraw);
+        } else {
+            scout.trainLateRounds++;
+            updateRngArenaScoutCounter(scout.mainTrainLateCounts, draw);
+            updateRngArenaScoutCounter(scout.secondaryTrainLateCounts, secondaryDraw);
+        }
+
+        (draw || []).forEach(number => {
+            const sectorIndex = getRngArenaScoutSectorIndex(number);
+            if (sectorIndex >= 0) scout.sectorTrainCounts[sectorIndex]++;
+        });
+        const structure = getRngArenaScoutStructure(draw);
+        scout.structureTrainCounts[structure] = (scout.structureTrainCounts[structure] || 0) + 1;
+        return;
+    }
+
+    if (context.phase === "test") {
+        ensureRngArenaScoutCandidates();
+        scout.testRounds++;
+        updateRngArenaScoutCounter(scout.mainTestCounts, draw);
+        updateRngArenaScoutCounter(scout.secondaryTestCounts, secondaryDraw);
+        (draw || []).forEach(number => {
+            const sectorIndex = getRngArenaScoutSectorIndex(number);
+            if (sectorIndex >= 0) scout.sectorTestCounts[sectorIndex]++;
+        });
+        evaluateRngArenaScoutCandidates(draw, secondaryDraw);
+    }
+}
+
+function getRngArenaScoutNumberMetrics(number, secondary = false) {
+    const scout = rngArenaState?.scout;
+    const config = getRngArenaConfig();
+    if (!scout) return { score: 0, overallRatio: 0, lateRatio: 0, momentumRatio: 0, stability: 0 };
+
+    const max = secondary ? (config.secondary?.max || 0) : config.max;
+    const drawCount = secondary ? (config.secondary?.drawCount || 0) : config.drawCount;
+    const totalCounts = secondary ? scout.secondaryTrainCounts : scout.mainTrainCounts;
+    const earlyCounts = secondary ? scout.secondaryTrainEarlyCounts : scout.mainTrainEarlyCounts;
+    const lateCounts = secondary ? scout.secondaryTrainLateCounts : scout.mainTrainLateCounts;
+
+    const expectedRate = max > 0 ? drawCount / max : 0;
+    const overallRate = scout.trainRounds > 0 ? Number(totalCounts[number] || 0) / scout.trainRounds : 0;
+    const earlyRate = scout.trainEarlyRounds > 0 ? Number(earlyCounts[number] || 0) / scout.trainEarlyRounds : overallRate;
+    const lateRate = scout.trainLateRounds > 0 ? Number(lateCounts[number] || 0) / scout.trainLateRounds : overallRate;
+    const safeExpected = Math.max(expectedRate, 1e-9);
+    const overallRatio = overallRate / safeExpected;
+    const lateRatio = lateRate / safeExpected;
+    const momentumRatio = (lateRate - earlyRate) / safeExpected;
+    const stability = clamp(1 - Math.abs(momentumRatio), 0, 1);
+
+    return {
+        overallRate,
+        earlyRate,
+        lateRate,
+        expectedRate,
+        overallRatio,
+        lateRatio,
+        momentumRatio,
+        stability,
+        score: 0.55 * overallRatio + 0.30 * lateRatio + 0.10 * clamp(momentumRatio, -1, 1) + 0.05 * stability
+    };
+}
+
+function getRngArenaScoutVariantScore(number, variant = "golden", secondary = false) {
+    const metrics = getRngArenaScoutNumberMetrics(number, secondary);
+    if (variant === "momentum") {
+        return 0.35 * metrics.overallRatio + 0.50 * metrics.lateRatio + 0.15 * clamp(metrics.momentumRatio, -1, 1);
+    }
+    if (variant === "stable") {
+        return 0.70 * metrics.overallRatio + 0.15 * metrics.lateRatio + 0.15 * metrics.stability;
+    }
+    return metrics.score;
+}
+
+function allocateRngArenaScoutSectorQuotas(totalCount) {
+    const scout = rngArenaState?.scout;
+    const config = getRngArenaConfig();
+    const ranges = getRngArenaScoutRanges();
+    const totalSectorHits = scout?.sectorTrainCounts?.reduce((sum, value) => sum + value, 0) || 0;
+
+    const weights = ranges.map((range, index) => {
+        if (totalSectorHits > 0) return scout.sectorTrainCounts[index] / totalSectorHits;
+        return range.capacity / config.max;
+    });
+
+    const raw = weights.map(weight => weight * totalCount);
+    const quotas = raw.map((value, index) => Math.min(ranges[index].capacity, Math.floor(value)));
+    let assigned = quotas.reduce((sum, value) => sum + value, 0);
+
+    const order = raw
+        .map((value, index) => ({ index, fraction: value - Math.floor(value), weight: weights[index] }))
+        .sort((a, b) => b.fraction - a.fraction || b.weight - a.weight);
+
+    let guard = 0;
+    while (assigned < totalCount && guard < 1000) {
+        guard++;
+        let changed = false;
+        for (const item of order) {
+            if (assigned >= totalCount) break;
+            if (quotas[item.index] >= ranges[item.index].capacity) continue;
+            quotas[item.index]++;
+            assigned++;
+            changed = true;
+        }
+        if (!changed) break;
+    }
+
+    return quotas;
+}
+
+function weightedRngArenaScoutSample(pool, count, variant, secondary = false) {
+    const available = [...pool];
+    const selected = [];
+
+    while (selected.length < count && available.length) {
+        const weights = available.map(number => {
+            const rawScore = Math.max(0.03, getRngArenaScoutVariantScore(number, variant, secondary));
+            return Math.pow(rawScore, 3);
+        });
+        const totalWeight = weights.reduce((sum, value) => sum + value, 0);
+        let needle = cryptoRandomFloat() * totalWeight;
+        let chosenIndex = available.length - 1;
+
+        for (let index = 0; index < available.length; index++) {
+            needle -= weights[index];
+            if (needle <= 0) {
+                chosenIndex = index;
+                break;
+            }
+        }
+
+        selected.push(available.splice(chosenIndex, 1)[0]);
+    }
+
+    return selected;
+}
+
+function buildRngArenaScoutMainTicket(variant = "golden", randomized = false) {
+    const pickCount = getRngArenaPickCount();
+    const ranges = getRngArenaScoutRanges();
+    const quotas = allocateRngArenaScoutSectorQuotas(pickCount);
+    const selected = [];
+
+    ranges.forEach((range, index) => {
+        const pool = Array.from({ length: range.capacity }, (_, offset) => range.start + offset);
+        const quota = Math.min(quotas[index] || 0, pool.length);
+        if (!quota) return;
+
+        const chosen = randomized
+            ? weightedRngArenaScoutSample(pool, quota, variant, false)
+            : pool
+                .sort((a, b) => getRngArenaScoutVariantScore(b, variant, false) - getRngArenaScoutVariantScore(a, variant, false) || a - b)
+                .slice(0, quota);
+        selected.push(...chosen);
+    });
+
+    // Awaryjne uzupełnienie, gdyby rozdział sektorów nie dobił do pickCount.
+    if (selected.length < pickCount) {
+        const fallback = Array.from({ length: getRngArenaConfig().max }, (_, index) => index + 1)
+            .filter(number => !selected.includes(number))
+            .sort((a, b) => getRngArenaScoutVariantScore(b, variant, false) - getRngArenaScoutVariantScore(a, variant, false) || a - b);
+        selected.push(...fallback.slice(0, pickCount - selected.length));
+    }
+
+    return selected.slice(0, pickCount).sort((a, b) => a - b);
+}
+
+function buildRngArenaScoutSecondaryTicket(variant = "golden", randomized = false) {
+    const config = getRngArenaConfig();
+    if (!config.secondary) return [];
+    const count = getRngArenaSecondaryPickCount();
+    const pool = Array.from({ length: config.secondary.max }, (_, index) => index + 1);
+
+    const selected = randomized
+        ? weightedRngArenaScoutSample(pool, count, variant, true)
+        : pool
+            .sort((a, b) => getRngArenaScoutVariantScore(b, variant, true) - getRngArenaScoutVariantScore(a, variant, true) || a - b)
+            .slice(0, count);
+
+    return selected.sort((a, b) => a - b);
+}
+
+function getRngArenaScoutCandidateConsistency(candidate) {
+    const mainMetrics = candidate.main.map(number => getRngArenaScoutNumberMetrics(number, false));
+    const secondaryMetrics = candidate.secondary.map(number => getRngArenaScoutNumberMetrics(number, true));
+    const all = [...mainMetrics, ...secondaryMetrics];
+    if (!all.length) return 0;
+    return Math.round(100 * all.reduce((sum, item) => sum + item.stability, 0) / all.length);
+}
+
+function createRngArenaScoutCandidate(variant = "golden", randomized = false) {
+    const main = buildRngArenaScoutMainTicket(variant, randomized);
+    const secondary = buildRngArenaScoutSecondaryTicket(variant, randomized);
+    const allScores = [
+        ...main.map(number => getRngArenaScoutVariantScore(number, variant, false)),
+        ...secondary.map(number => getRngArenaScoutVariantScore(number, variant, true))
+    ];
+    const trainScore = allScores.length
+        ? allScores.reduce((sum, value) => sum + value, 0) / allScores.length
+        : 0;
+
+    return {
+        variant,
+        main,
+        secondary,
+        structure: getRngArenaScoutStructure(main),
+        trainScore,
+        consistency: getRngArenaScoutCandidateConsistency({ main, secondary }),
+        testRounds: 0,
+        sumMainHits: 0,
+        sumSecondaryHits: 0,
+        bestMain: 0,
+        bestSecondary: 0,
+        perfects: 0,
+        finalScore: 0,
+        mainLiftPercent: 0,
+        secondaryLiftPercent: 0
+    };
+}
+
+function ensureRngArenaScoutCandidates() {
+    const scout = rngArenaState?.scout;
+    if (!scout?.enabled || scout.candidates.length) return;
+    if (scout.trainRounds < 1) return;
+
+    const variants = ["golden", "momentum", "stable"];
+    const candidates = [];
+    const seen = new Set();
+    const pushUnique = candidate => {
+        const key = `${candidate.main.join("-")}|${candidate.secondary.join("-")}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        candidates.push(candidate);
+        return true;
+    };
+
+    // Najpierw trzy czyste profile, potem szersza pula ważonych wariantów.
+    variants.forEach(variant => pushUnique(createRngArenaScoutCandidate(variant, false)));
+
+    let attempts = 0;
+    while (candidates.length < RNG_ARENA_SCOUT_CANDIDATE_COUNT && attempts < RNG_ARENA_SCOUT_CANDIDATE_COUNT * 20) {
+        const variant = variants[attempts % variants.length];
+        pushUnique(createRngArenaScoutCandidate(variant, true));
+        attempts++;
+    }
+
+    scout.candidates = candidates;
+    scout.frozenAtRound = rngArenaState.rounds;
+}
+
+function evaluateRngArenaScoutCandidates(draw, secondaryDraw) {
+    const scout = rngArenaState?.scout;
+    if (!scout?.candidates?.length) return;
+    const config = getRngArenaConfig();
+    const pickCount = getRngArenaPickCount();
+
+    scout.candidates.forEach(candidate => {
+        const mainHits = getRngArenaHits(candidate.main, draw);
+        const secondaryHits = config.secondary ? getRngArenaHits(candidate.secondary, secondaryDraw) : 0;
+        candidate.testRounds++;
+        candidate.sumMainHits += mainHits;
+        candidate.sumSecondaryHits += secondaryHits;
+        candidate.bestMain = Math.max(candidate.bestMain, mainHits);
+        candidate.bestSecondary = Math.max(candidate.bestSecondary, secondaryHits);
+        if (isRngArenaPerfect(mainHits, secondaryHits, config, pickCount)) candidate.perfects++;
+    });
+}
+
+function scoreRngArenaScoutCandidates() {
+    const scout = rngArenaState?.scout;
+    const config = getRngArenaConfig();
+    if (!scout?.candidates?.length) return [];
+
+    const pickCount = getRngArenaPickCount();
+    const expectedMain = Math.max(1e-9, pickCount * config.drawCount / config.max);
+    const secondaryPickCount = getRngArenaSecondaryPickCount();
+    const expectedSecondary = config.secondary
+        ? Math.max(1e-9, secondaryPickCount * config.secondary.drawCount / config.secondary.max)
+        : 0;
+
+    scout.candidates.forEach(candidate => {
+        const rounds = Math.max(1, candidate.testRounds);
+        const avgMain = candidate.sumMainHits / rounds;
+        const avgSecondary = candidate.sumSecondaryHits / rounds;
+        const mainRatio = candidate.testRounds ? avgMain / expectedMain : candidate.trainScore;
+        const secondaryRatio = config.secondary && candidate.testRounds
+            ? avgSecondary / expectedSecondary
+            : 0;
+
+        candidate.avgMainHits = avgMain;
+        candidate.avgSecondaryHits = avgSecondary;
+        candidate.mainLiftPercent = candidate.testRounds ? ((mainRatio - 1) * 100) : 0;
+        candidate.secondaryLiftPercent = config.secondary && candidate.testRounds ? ((secondaryRatio - 1) * 100) : 0;
+        candidate.finalScore = candidate.testRounds
+            ? (config.secondary ? (0.78 * mainRatio + 0.22 * secondaryRatio) : mainRatio)
+            : candidate.trainScore;
+    });
+
+    return [...scout.candidates].sort((a, b) =>
+        b.finalScore - a.finalScore ||
+        b.perfects - a.perfects ||
+        b.bestMain - a.bestMain ||
+        b.bestSecondary - a.bestSecondary ||
+        b.trainScore - a.trainScore
+    );
+}
+
+function finalizeRngArenaScout() {
+    const scout = rngArenaState?.scout;
+    if (!scout?.enabled) return null;
+    ensureRngArenaScoutCandidates();
+    const ranked = scoreRngArenaScoutCandidates();
+    scout.phase = "final";
+    scout.finalResult = {
+        ranked,
+        generatedAtRound: rngArenaState.rounds,
+        testRounds: scout.testRounds,
+        trainRounds: scout.trainRounds
+    };
+    return scout.finalResult;
+}
+
+function getRngArenaScoutTopSignals(limit = 8, secondary = false) {
+    const config = getRngArenaConfig();
+    const max = secondary ? (config.secondary?.max || 0) : config.max;
+    if (!max) return [];
+
+    return Array.from({ length: max }, (_, index) => index + 1)
+        .map(number => ({ number, ...getRngArenaScoutNumberMetrics(number, secondary) }))
+        .sort((a, b) => b.score - a.score || b.overallRatio - a.overallRatio || a.number - b.number)
+        .slice(0, limit);
+}
+
+function getRngArenaScoutDominantStructure() {
+    const scout = rngArenaState?.scout;
+    if (!scout) return null;
+    const entries = Object.entries(scout.structureTrainCounts || {});
+    if (!entries.length) return null;
+    return entries.sort((a, b) => b[1] - a[1])[0];
+}
+
+function getRngArenaScoutSectorLeaders(limit = 3) {
+    const scout = rngArenaState?.scout;
+    const ranges = getRngArenaScoutRanges();
+    const total = scout?.sectorTrainCounts?.reduce((sum, value) => sum + value, 0) || 0;
+    return ranges
+        .map((range, index) => ({
+            ...range,
+            count: scout?.sectorTrainCounts?.[index] || 0,
+            share: total > 0 ? (scout.sectorTrainCounts[index] / total) * 100 : 0
+        }))
+        .sort((a, b) => b.share - a.share)
+        .slice(0, limit);
+}
+
+function formatRngArenaScoutTrend(metrics) {
+    if (metrics.momentumRatio > 0.05) return { icon: "↑", label: "rośnie", className: "up" };
+    if (metrics.momentumRatio < -0.05) return { icon: "↓", label: "spada", className: "down" };
+    return { icon: "→", label: "stabilna", className: "flat" };
+}
+
+function formatRngArenaScoutTicket(candidate) {
+    const config = getRngArenaConfig();
+    const main = (candidate?.main || []).join(",");
+    if (!config.secondary) return main;
+    return `${main} | ${config.secondary.label}:${(candidate?.secondary || []).join(",")}`;
+}
+
+function getRngArenaScoutPhaseLabel() {
+    const scout = rngArenaState?.scout;
+    if (!scout?.enabled) return "WYŁĄCZONY";
+    if (scout.phase === "final") return "GOTOWY";
+    if (scout.phase === "test") return "TEST 30%";
+    if (scout.phase === "train") return "TRAIN 70%";
+    return "OCZEKUJE";
+}
+
+function renderRngArenaScoutSignals(signals, title) {
+    if (!signals.length) return "";
+    return `
+        <div class="rng-scout-signal-block">
+            <span>${title}</span>
+            <div class="rng-scout-signal-list">
+                ${signals.map(item => {
+                    const trend = formatRngArenaScoutTrend(item);
+                    return `<div><strong>${String(item.number).padStart(2, "0")}</strong><b class="${trend.className}">${trend.icon}</b><small>${trend.label}</small></div>`;
+                }).join("")}
+            </div>
+        </div>
+    `;
+}
+
+function renderRngArenaScoutCandidateCard(candidate, index, final = false) {
+    const config = getRngArenaConfig();
+    const labels = ["🥇 GOLDEN TICKET", "🥈 ALTERNATYWA A", "🥉 ALTERNATYWA B"];
+    const variantLabel = candidate.variant === "momentum" ? "MOMENTUM" : candidate.variant === "stable" ? "STABILNY" : "BALANS";
+    const testText = candidate.testRounds
+        ? `śr. ${candidate.avgMainHits.toFixed(3)} traf. / rundę • max ${candidate.bestMain}`
+        : "bez oddzielnego TESTU";
+    const liftText = candidate.testRounds
+        ? `${candidate.mainLiftPercent >= 0 ? "+" : ""}${candidate.mainLiftPercent.toFixed(2)}% vs oczekiwana średnia sesji`
+        : "ranking tylko z części TRAIN";
+
+    return `
+        <article class="rng-scout-candidate ${index === 0 ? "winner" : ""}">
+            <div class="rng-scout-candidate-head">
+                <div>
+                    <span>${labels[index] || `KANDYDAT #${index + 1}`}</span>
+                    <strong>${variantLabel}</strong>
+                </div>
+                <b>Spójność ${candidate.consistency}/100</b>
+            </div>
+            <div class="rng-scout-ticket-balls">${renderRngArenaBalls(candidate.main, index === 0 ? "scout" : "main")}</div>
+            ${config.secondary ? `<div class="rng-scout-ticket-balls secondary-row">${renderRngArenaBalls(candidate.secondary, "secondary")}</div>` : ""}
+            <div class="rng-scout-candidate-meta">
+                <span>Struktura <strong>${candidate.structure}</strong></span>
+                <span>TEST <strong>${testText}</strong></span>
+                <span>Odchylenie <strong>${liftText}</strong></span>
+                ${config.secondary && candidate.testRounds ? `<span>${config.secondary.label} <strong>śr. ${candidate.avgSecondaryHits.toFixed(3)} • ${candidate.secondaryLiftPercent >= 0 ? "+" : ""}${candidate.secondaryLiftPercent.toFixed(2)}%</strong></span>` : ""}
+            </div>
+            ${final ? `<button type="button" class="lab-secondary-btn rng-scout-copy-btn" data-rng-scout-copy="${index}">📋 Kopiuj zestaw</button>` : ""}
+        </article>
+    `;
+}
+
+function renderRngArenaScoutPanel() {
+    const scout = rngArenaState?.scout;
+    if (!scout) return "";
+
+    if (!scout.enabled) {
+        return `
+            <section class="rng-scout-panel disabled">
+                <div class="rng-scout-head"><div><span>🏆 GOLDEN TICKET / RNG SCOUT</span><strong>Scout jest wyłączony</strong></div><b>OFF</b></div>
+                <p>Włącz „Golden Scout” przed startem sesji, aby analizować główne wirtualne losowania.</p>
+            </section>
+        `;
+    }
+
+    const context = getRngArenaScoutBatchContext();
+    if (scout.phase !== "final" && context.phase !== "disabled") scout.phase = context.phase;
+    const timed = getRngArenaDurationMs() > 0;
+    const progress = timed ? Math.round((scout.lastProgress || context.progress || 0) * 100) : null;
+    const dominantStructure = getRngArenaScoutDominantStructure();
+    const sectorLeaders = getRngArenaScoutSectorLeaders(3);
+    const mainSignals = getRngArenaScoutTopSignals(8, false);
+    const secondarySignals = getRngArenaConfig().secondary ? getRngArenaScoutTopSignals(5, true) : [];
+
+    let candidateHtml = "";
+    if (scout.phase === "final" && scout.finalResult?.ranked?.length) {
+        candidateHtml = `
+            <div class="rng-scout-final-title">
+                <span>🏆 WYNIK SESJI</span>
+                <strong>Najmocniejsze zestawy znalezione przez TRAIN → TEST</strong>
+                <small>${scout.trainRounds.toLocaleString("pl-PL")} rund TRAIN • ${scout.testRounds.toLocaleString("pl-PL")} rund TEST • ${scout.candidates.length} kandydatów</small>
+            </div>
+            <div class="rng-scout-candidates">
+                ${scout.finalResult.ranked.slice(0, 3).map((candidate, index) => renderRngArenaScoutCandidateCard(candidate, index, true)).join("")}
+            </div>
+        `;
+    } else if (scout.phase === "test" && scout.candidates.length) {
+        const ranked = scoreRngArenaScoutCandidates();
+        candidateHtml = `
+            <div class="rng-scout-live-ticket">
+                <span>🧪 TEST trwa — kandydaci są zamrożeni</span>
+                <strong>Aktualny lider testu</strong>
+                ${ranked.length ? renderRngArenaScoutCandidateCard(ranked[0], 0, false) : ""}
+            </div>
+        `;
+    } else if (scout.trainRounds >= 5) {
+        const preview = createRngArenaScoutCandidate("golden", false);
+        candidateHtml = `
+            <div class="rng-scout-live-ticket">
+                <span>🔬 PODGLĄD TRAIN</span>
+                <strong>Roboczy kandydat — zostanie zamrożony dopiero przy wejściu w TEST</strong>
+                ${renderRngArenaScoutCandidateCard(preview, 0, false)}
+            </div>
+        `;
+    } else {
+        candidateHtml = `<div class="rng-scout-waiting">Zbieram pierwsze losowania do profilu sesji…</div>`;
+    }
+
+    return `
+        <section class="rng-scout-panel ${scout.phase === "final" ? "final" : ""}">
+            <div class="rng-scout-head">
+                <div>
+                    <span>🏆 GOLDEN TICKET / RNG SCOUT</span>
+                    <strong>Łowca profilu głównego losowania</strong>
+                </div>
+                <b class="phase-${scout.phase}">${getRngArenaScoutPhaseLabel()}</b>
+            </div>
+
+            <div class="rng-scout-progress-wrap">
+                <div class="rng-scout-progress"><i style="width:${timed ? progress : 100}%"></i></div>
+                <small>${timed ? `${progress}% sesji • TRAIN 70% → TEST 30%` : "Bez limitu: trwa ciągły TRAIN; ustaw czas sesji, aby dostać oddzielny TEST i finał."}</small>
+            </div>
+
+            <div class="rng-scout-stats">
+                <div><span>Obserwacje</span><strong>${scout.totalObserved.toLocaleString("pl-PL")}</strong></div>
+                <div><span>TRAIN</span><strong>${scout.trainRounds.toLocaleString("pl-PL")}</strong></div>
+                <div><span>TEST</span><strong>${scout.testRounds.toLocaleString("pl-PL")}</strong></div>
+                <div><span>Kandydaci</span><strong>${scout.candidates.length || "—"}</strong></div>
+                <div><span>Dominująca struktura losowania</span><strong>${dominantStructure ? `${dominantStructure[0]} (${dominantStructure[1]}×)` : "—"}</strong></div>
+                <div><span>Najmocniejsze sektory TRAIN</span><strong>${sectorLeaders.length ? sectorLeaders.map(item => `${item.start}-${item.end} (${item.share.toFixed(1)}%)`).join(" • ") : "—"}</strong></div>
+            </div>
+
+            <div class="rng-scout-signals-grid">
+                ${renderRngArenaScoutSignals(mainSignals, "Najmocniejsze liczby TRAIN")}
+                ${secondarySignals.length ? renderRngArenaScoutSignals(secondarySignals, `${getRngArenaConfig().secondary.label} — sygnały TRAIN`) : ""}
+            </div>
+
+            ${candidateHtml}
+
+            <div class="rng-scout-note">
+                <strong>Jak to działa:</strong> Scout czyta tylko główne wirtualne losowania Web Crypto. Pierwsze 70% sesji buduje profil i pulę kandydatów, ostatnie 30% ocenia zamrożone kupony na nowych losowaniach. Pary, trójki i czwórki nie są używane do wyboru. „Golden Ticket” oznacza lidera tej sesji symulacyjnej, nie przewagę nad przyszłym niezależnym losowaniem.
+            </div>
+        </section>
+    `;
+}
+
+function bindRngArenaScoutResultEvents() {
+    document.querySelectorAll("[data-rng-scout-copy]").forEach(button => {
+        button.addEventListener("click", () => {
+            const index = Number(button.dataset.rngScoutCopy || 0);
+            const ranked = rngArenaState?.scout?.finalResult?.ranked || [];
+            const candidate = ranked[index];
+            if (!candidate) return;
+            copyLaboratoryText(formatRngArenaScoutTicket(candidate), button);
+        });
+    });
+}
+
+
 function createRngArenaState(gameKey = "mini") {
     const key = RNG_ARENA_GAME_CONFIG[gameKey] ? gameKey : "mini";
     const durationMinutes = 60;
@@ -8773,6 +9419,7 @@ function createRngArenaState(gameKey = "mini") {
         firstPerfect: null,
         lastDraw: [],
         lastSecondaryDraw: [],
+        scout: createRngArenaScoutState(key),
         competitors: {
             rng: makeRngArenaCompetitor("🎲 RNG / Chybił-Trafił"),
             me: makeRngArenaCompetitor("👤 Moje typy"),
@@ -8972,6 +9619,8 @@ function resetRngArenaStats(keepTickets = true) {
         ? getRngArenaDurationMs()
         : Infinity;
 
+    resetRngArenaScout(true);
+
     Object.values(rngArenaState.competitors).forEach(competitor => {
         competitor.wins = 0;
         competitor.bestMain = 0;
@@ -9015,7 +9664,7 @@ function prepareRngArenaTickets() {
     }
 }
 
-function runRngArenaRound() {
+function runRngArenaRound(scoutContext = null) {
     const config = getRngArenaConfig();
     const pickCount = getRngArenaPickCount();
 
@@ -9031,6 +9680,12 @@ function runRngArenaRound() {
     rngArenaState.rounds++;
     rngArenaState.lastDraw = draw;
     rngArenaState.lastSecondaryDraw = secondaryDraw;
+
+    observeRngArenaScoutDraw(
+        draw,
+        secondaryDraw,
+        scoutContext || getRngArenaScoutBatchContext()
+    );
 
     const results = [];
     let strongestWinEvent = null;
@@ -9175,6 +9830,7 @@ function finishRngArenaTimedSession() {
     rngArenaState.timerEndAt = null;
     rngArenaState.sessionCompleted = true;
     rngArenaState.sessionSummary = buildRngArenaSessionSummary();
+    finalizeRngArenaScout();
     if (rngArenaState.soundEnabled) playRngArenaSound("big");
     renderRngArenaLive();
 }
@@ -9226,8 +9882,10 @@ function renderRngArenaSessionSummary() {
 
 function runRngArenaBatch(amount) {
     let strongestWinEvent = null;
+    const scoutContext = getRngArenaScoutBatchContext();
+    if (scoutContext.phase === "test") ensureRngArenaScoutCandidates();
     for (let i = 0; i < amount; i++) {
-        strongestWinEvent = pickStrongerRngArenaSound(strongestWinEvent, runRngArenaRound());
+        strongestWinEvent = pickStrongerRngArenaSound(strongestWinEvent, runRngArenaRound(scoutContext));
     }
     // Przy 10/100/1000 losowaniach na sekundę nie gramy setek dźwięków naraz.
     // Odtwarzamy jeden — najmocniejsze trafienie z całej paczki.
@@ -9380,6 +10038,7 @@ function renderRngArenaLive() {
     const winAlert = document.getElementById("rngArenaWinAlert");
     const financeInfo = document.getElementById("rngArenaFinanceInfo");
     const sessionSummaryHost = document.getElementById("rngArenaSessionSummary");
+    const scoutHost = document.getElementById("rngArenaScoutHost");
 
     if (status) {
         status.innerHTML = `
@@ -9394,6 +10053,11 @@ function renderRngArenaLive() {
 
     if (sessionSummaryHost) {
         sessionSummaryHost.innerHTML = renderRngArenaSessionSummary();
+    }
+
+    if (scoutHost) {
+        scoutHost.innerHTML = renderRngArenaScoutPanel();
+        bindRngArenaScoutResultEvents();
     }
 
     if (financeInfo) {
@@ -9430,9 +10094,14 @@ function renderRngArenaLive() {
     const user2Setup = document.getElementById("rngArenaUser2Setup");
     const user2Toggle = document.getElementById("rngArenaUser2Enabled");
     const soundToggle = document.getElementById("rngArenaSoundEnabled");
+    const scoutToggle = document.getElementById("rngArenaScoutEnabled");
     if (setup) setup.classList.toggle("two-players", !rngArenaState.user2Enabled);
     if (user2Setup) user2Setup.classList.toggle("user2-disabled", !rngArenaState.user2Enabled);
     if (user2Toggle) user2Toggle.checked = rngArenaState.user2Enabled;
+    if (scoutToggle) {
+        scoutToggle.checked = rngArenaState.scout?.enabled !== false;
+        scoutToggle.disabled = rngArenaState.running;
+    }
     if (firstPerfect) {
         firstPerfect.innerHTML = rngArenaState.firstPerfect
             ? `🏆 Pierwsze pełne trafienie: <strong>${rngArenaState.firstPerfect.label}</strong> w rundzie <strong>#${rngArenaState.firstPerfect.round.toLocaleString("pl-PL")}</strong>`
@@ -9465,6 +10134,7 @@ function bindRngArenaEvents() {
     const durationSelect = document.getElementById("rngArenaDuration");
     const user2Toggle = document.getElementById("rngArenaUser2Enabled");
     const soundToggle = document.getElementById("rngArenaSoundEnabled");
+    const scoutToggle = document.getElementById("rngArenaScoutEnabled");
 
     gameSelect?.addEventListener("change", () => showRngArena(gameSelect.value));
     pickSelect?.addEventListener("change", () => {
@@ -9501,6 +10171,17 @@ function bindRngArenaEvents() {
             ensureRngArenaAudio();
             playRngArenaSound("alert");
         }
+    });
+
+    scoutToggle?.addEventListener("change", () => {
+        if (rngArenaState.running) {
+            scoutToggle.checked = rngArenaState.scout?.enabled !== false;
+            return;
+        }
+        const enabled = scoutToggle.checked;
+        rngArenaState.scout = createRngArenaScoutState(rngArenaState.gameKey);
+        rngArenaState.scout.enabled = enabled;
+        renderRngArenaLive();
     });
 
     document.getElementById("rngArenaStartBtn")?.addEventListener("click", startRngArena);
@@ -9551,6 +10232,7 @@ function showRngArena(gameKey = null, forcedPickCount = null, forcedSecondaryPic
     rngArenaState.speed = previous?.speed || 1;
     rngArenaState.user2Enabled = previous ? previous.user2Enabled !== false : true;
     rngArenaState.soundEnabled = previous ? previous.soundEnabled !== false : true;
+    rngArenaState.scout.enabled = previous?.scout ? previous.scout.enabled !== false : true;
     rngArenaState.durationMinutes = previous ? Math.max(0, Number(previous.durationMinutes ?? 60)) : 60;
     rngArenaState.remainingMs = rngArenaState.durationMinutes > 0
         ? rngArenaState.durationMinutes * 60 * 1000
@@ -9614,6 +10296,12 @@ function showRngArena(gameKey = null, forcedPickCount = null, forcedSecondaryPic
                             <strong>🔊 Alert / Big / EPIC</strong>
                         </span>
                     </label>
+                    <label class="rng-arena-toggle-control rng-scout-toggle-control">Golden Scout
+                        <span class="rng-arena-toggle-line">
+                            <input id="rngArenaScoutEnabled" type="checkbox" ${rngArenaState.scout?.enabled !== false ? "checked" : ""}>
+                            <strong>🏆 TRAIN 70% → TEST 30%</strong>
+                        </span>
+                    </label>
                 </div>
             </div>
 
@@ -9656,6 +10344,8 @@ function showRngArena(gameKey = null, forcedPickCount = null, forcedSecondaryPic
                 <div id="rngArenaDraw" class="rng-arena-draw-balls"></div>
                 ${config.secondary ? `<div id="rngArenaSecondaryDraw" class="rng-arena-draw-balls secondary-row"></div>` : ""}
             </section>
+
+            <div id="rngArenaScoutHost"></div>
 
             <div id="rngArenaFinanceInfo" class="rng-arena-finance-info"></div>
             <div id="rngArenaPrizeTableHost">${renderRngArenaPrizeTable(resolvedKey, pickCount)}</div>

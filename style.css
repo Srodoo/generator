@@ -5039,3 +5039,489 @@ button,.primary-btn{border:0;border-radius:11px!important;padding:11px 16px!impo
         width:100%;
     }
 }
+
+/* =========================================================
+   LOTTOFORGE 10.09.2026 — GOLDEN TICKET / RNG SCOUT
+   Desktop + mobile. Analiza głównego wirtualnego losowania.
+   ========================================================= */
+.rng-scout-toggle-control{
+    grid-column:span 1;
+}
+
+#rngArenaScoutHost{
+    width:100%;
+    margin-top:16px;
+}
+
+.rng-scout-panel{
+    width:100%;
+    padding:18px;
+    border-radius:18px;
+    border:1px solid rgba(247,198,92,.28);
+    background:
+        radial-gradient(circle at 100% 0%,rgba(247,198,92,.10),transparent 34%),
+        radial-gradient(circle at 0% 100%,rgba(124,92,255,.08),transparent 30%),
+        linear-gradient(145deg,rgba(18,25,38,.98),rgba(9,14,23,.99));
+    box-shadow:0 16px 38px rgba(0,0,0,.22);
+}
+
+.rng-scout-panel.final{
+    border-color:rgba(247,198,92,.46);
+    box-shadow:0 18px 44px rgba(0,0,0,.25),inset 0 0 0 1px rgba(247,198,92,.04);
+}
+
+.rng-scout-panel.disabled{
+    opacity:.78;
+    border-color:rgba(120,137,164,.20);
+}
+
+.rng-scout-panel.disabled p{
+    margin:10px 0 0!important;
+    font-size:12px!important;
+    line-height:1.5;
+    color:#8290a5!important;
+}
+
+.rng-scout-head{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:14px;
+    margin-bottom:13px;
+}
+
+.rng-scout-head > div{
+    min-width:0;
+    display:flex;
+    flex-direction:column;
+    gap:4px;
+}
+
+.rng-scout-head span{
+    color:#f4cf72;
+    font-size:10px;
+    font-weight:900;
+    letter-spacing:.10em;
+}
+
+.rng-scout-head strong{
+    color:#f5f7ff;
+    font-size:18px;
+    line-height:1.3;
+}
+
+.rng-scout-head > b{
+    flex:0 0 auto;
+    padding:6px 9px;
+    border-radius:999px;
+    border:1px solid rgba(247,198,92,.25);
+    background:rgba(247,198,92,.08);
+    color:#f3cf78;
+    font-size:10px;
+    font-weight:900;
+    letter-spacing:.06em;
+    white-space:nowrap;
+}
+
+.rng-scout-head > b.phase-test{
+    color:#8acaff;
+    border-color:rgba(62,166,255,.28);
+    background:rgba(62,166,255,.08);
+}
+
+.rng-scout-head > b.phase-final{
+    color:#7ce6aa;
+    border-color:rgba(64,216,138,.30);
+    background:rgba(64,216,138,.08);
+}
+
+.rng-scout-progress-wrap{
+    margin-bottom:14px;
+}
+
+.rng-scout-progress{
+    width:100%;
+    height:8px;
+    overflow:hidden;
+    border-radius:999px;
+    background:#111927;
+    border:1px solid rgba(106,124,153,.14);
+}
+
+.rng-scout-progress i{
+    display:block;
+    height:100%;
+    border-radius:inherit;
+    background:linear-gradient(90deg,#7c5cff 0%,#3ea6ff 70%,#f7c65c 70%,#f7c65c 100%);
+    transition:width .25s ease;
+}
+
+.rng-scout-progress-wrap > small{
+    display:block;
+    margin-top:6px;
+    color:#7f8da3;
+    font-size:10px;
+    line-height:1.4;
+}
+
+.rng-scout-stats{
+    display:grid;
+    grid-template-columns:repeat(4,minmax(0,1fr));
+    gap:8px;
+}
+
+.rng-scout-stats > div{
+    min-width:0;
+    padding:10px 11px;
+    border-radius:11px;
+    background:#0d1420;
+    border:1px solid rgba(93,111,139,.14);
+}
+
+.rng-scout-stats > div:nth-last-child(-n+2){
+    grid-column:span 2;
+}
+
+.rng-scout-stats span{
+    display:block;
+    margin-bottom:5px;
+    color:#718097;
+    font-size:9px;
+    font-weight:850;
+    text-transform:uppercase;
+    letter-spacing:.055em;
+}
+
+.rng-scout-stats strong{
+    display:block;
+    color:#eaf0fb;
+    font-size:12px;
+    line-height:1.4;
+    word-break:break-word;
+}
+
+.rng-scout-signals-grid{
+    display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:10px;
+    margin-top:12px;
+}
+
+.rng-scout-signal-block{
+    padding:11px;
+    border-radius:12px;
+    background:rgba(12,18,29,.88);
+    border:1px solid rgba(96,114,143,.14);
+}
+
+.rng-scout-signal-block > span{
+    display:block;
+    margin-bottom:8px;
+    color:#8f9eb4;
+    font-size:10px;
+    font-weight:850;
+    text-transform:uppercase;
+    letter-spacing:.055em;
+}
+
+.rng-scout-signal-list{
+    display:flex;
+    flex-wrap:wrap;
+    gap:6px;
+}
+
+.rng-scout-signal-list > div{
+    display:grid;
+    grid-template-columns:auto auto;
+    align-items:center;
+    gap:1px 5px;
+    min-width:70px;
+    padding:7px 8px;
+    border-radius:9px;
+    background:#101826;
+    border:1px solid rgba(104,122,150,.14);
+}
+
+.rng-scout-signal-list strong{
+    color:#edf3ff;
+    font-size:13px;
+}
+
+.rng-scout-signal-list b{
+    font-size:14px;
+    text-align:right;
+}
+
+.rng-scout-signal-list b.up{color:#72e3a5;}
+.rng-scout-signal-list b.down{color:#ff8b96;}
+.rng-scout-signal-list b.flat{color:#8acaff;}
+
+.rng-scout-signal-list small{
+    grid-column:1/-1;
+    color:#68778d;
+    font-size:8px;
+    text-transform:uppercase;
+}
+
+.rng-scout-live-ticket,
+.rng-scout-final-title{
+    margin-top:14px;
+    padding-top:14px;
+    border-top:1px solid rgba(112,128,156,.14);
+}
+
+.rng-scout-live-ticket > span,
+.rng-scout-final-title > span{
+    display:block;
+    color:#f4cf72;
+    font-size:10px;
+    font-weight:900;
+    letter-spacing:.08em;
+}
+
+.rng-scout-live-ticket > strong,
+.rng-scout-final-title > strong{
+    display:block;
+    margin-top:4px;
+    color:#f1f5fd;
+    font-size:14px;
+    line-height:1.4;
+}
+
+.rng-scout-final-title > small{
+    display:block;
+    margin-top:5px;
+    color:#7e8ba0;
+    font-size:10px;
+}
+
+.rng-scout-candidates{
+    display:grid;
+    grid-template-columns:repeat(3,minmax(0,1fr));
+    gap:10px;
+    margin-top:11px;
+}
+
+.rng-scout-live-ticket .rng-scout-candidate{
+    margin-top:10px;
+}
+
+.rng-scout-candidate{
+    min-width:0;
+    padding:13px;
+    border-radius:14px;
+    background:linear-gradient(180deg,rgba(15,22,34,.98),rgba(10,15,24,.98));
+    border:1px solid rgba(105,124,154,.16);
+}
+
+.rng-scout-candidate.winner{
+    border-color:rgba(247,198,92,.38);
+    background:
+        radial-gradient(circle at 100% 0%,rgba(247,198,92,.08),transparent 38%),
+        linear-gradient(180deg,rgba(18,25,38,.98),rgba(10,15,24,.98));
+}
+
+.rng-scout-candidate-head{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:8px;
+}
+
+.rng-scout-candidate-head > div{
+    min-width:0;
+    display:flex;
+    flex-direction:column;
+    gap:3px;
+}
+
+.rng-scout-candidate-head span{
+    color:#f2ca6b;
+    font-size:9px;
+    font-weight:900;
+    letter-spacing:.065em;
+}
+
+.rng-scout-candidate-head strong{
+    color:#dfe7f5;
+    font-size:11px;
+}
+
+.rng-scout-candidate-head > b{
+    flex:0 0 auto;
+    color:#8aa0be;
+    font-size:9px;
+    font-weight:850;
+    white-space:nowrap;
+}
+
+.rng-scout-ticket-balls{
+    display:flex;
+    flex-wrap:wrap;
+    gap:4px;
+    margin-top:10px;
+}
+
+.rng-scout-ticket-balls.secondary-row{
+    margin-top:7px;
+    padding-top:7px;
+    border-top:1px solid rgba(92,108,137,.12);
+}
+
+.rng-arena-ball.scout{
+    border-color:rgba(247,198,92,.46)!important;
+    box-shadow:inset -5px -7px 12px rgba(0,0,0,.24),0 0 0 2px rgba(247,198,92,.08),0 7px 14px rgba(0,0,0,.20)!important;
+}
+
+.rng-scout-candidate-meta{
+    display:grid;
+    gap:5px;
+    margin-top:10px;
+}
+
+.rng-scout-candidate-meta > span{
+    display:flex;
+    justify-content:space-between;
+    gap:10px;
+    padding-top:5px;
+    border-top:1px solid rgba(95,112,140,.10);
+    color:#718097;
+    font-size:9px;
+    line-height:1.35;
+}
+
+.rng-scout-candidate-meta strong{
+    color:#cfd9e9;
+    font-size:9px;
+    text-align:right;
+}
+
+.rng-scout-copy-btn{
+    width:100%;
+    margin-top:10px!important;
+}
+
+.rng-scout-waiting{
+    margin-top:13px;
+    padding:11px 12px;
+    border-radius:10px;
+    background:rgba(62,166,255,.05);
+    border:1px solid rgba(62,166,255,.13);
+    color:#8ca1bd;
+    font-size:11px;
+}
+
+.rng-scout-note{
+    margin-top:13px;
+    padding:10px 11px;
+    border-radius:10px;
+    background:rgba(247,198,92,.045);
+    border-left:3px solid rgba(247,198,92,.48);
+    color:#8391a6;
+    font-size:10px;
+    line-height:1.55;
+}
+
+.rng-scout-note strong{
+    color:#c8d2e2;
+}
+
+@media(max-width:1050px){
+    .rng-scout-stats{grid-template-columns:repeat(2,minmax(0,1fr));}
+    .rng-scout-stats > div:nth-last-child(-n+2){grid-column:span 1;}
+    .rng-scout-candidates{grid-template-columns:1fr;}
+}
+
+/* Telefon — Golden Scout jest projektowany razem z desktopem, nie jako późniejszy dodatek. */
+@media(max-width:899px){
+    #rngArenaScoutHost{
+        margin-top:12px;
+    }
+    .rng-scout-panel{
+        padding:14px;
+        border-radius:15px;
+    }
+    .rng-scout-signals-grid{
+        grid-template-columns:1fr;
+    }
+    .rng-scout-candidates{
+        grid-template-columns:1fr;
+    }
+    .rng-scout-ticket-balls .rng-arena-ball{
+        width:38px!important;
+        height:38px!important;
+        flex-basis:38px!important;
+        font-size:11px!important;
+        margin:1px!important;
+    }
+    .rng-scout-copy-btn{
+        min-height:44px;
+    }
+}
+
+@media(max-width:620px){
+    .rng-scout-head{
+        flex-direction:column;
+        gap:8px;
+    }
+    .rng-scout-head strong{
+        font-size:16px;
+    }
+    .rng-scout-head > b{
+        align-self:flex-start;
+    }
+    .rng-scout-stats{
+        grid-template-columns:1fr 1fr;
+        gap:7px;
+    }
+    .rng-scout-stats > div:nth-last-child(-n+2){
+        grid-column:1/-1;
+    }
+    .rng-scout-signal-list > div{
+        min-width:calc(25% - 5px);
+        flex:1 1 calc(25% - 5px);
+    }
+    .rng-scout-candidate{
+        padding:11px;
+    }
+    .rng-scout-candidate-head{
+        flex-direction:column;
+    }
+    .rng-scout-candidate-head > b{
+        white-space:normal;
+    }
+    .rng-scout-candidate-meta > span{
+        flex-direction:column;
+        gap:2px;
+    }
+    .rng-scout-candidate-meta strong{
+        text-align:left;
+    }
+}
+
+@media(max-width:420px){
+    .rng-scout-panel{
+        padding:12px;
+        margin-left:0;
+        margin-right:0;
+    }
+    .rng-scout-stats{
+        grid-template-columns:1fr;
+    }
+    .rng-scout-stats > div:nth-last-child(-n+2){
+        grid-column:auto;
+    }
+    .rng-scout-signal-list > div{
+        min-width:calc(50% - 4px);
+        flex:1 1 calc(50% - 4px);
+    }
+    .rng-scout-ticket-balls{
+        gap:3px;
+    }
+    .rng-scout-ticket-balls .rng-arena-ball{
+        width:35px!important;
+        height:35px!important;
+        flex-basis:35px!important;
+        font-size:10px!important;
+    }
+}
