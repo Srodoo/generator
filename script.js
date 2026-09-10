@@ -392,6 +392,7 @@ const importBtn = document.getElementById("importBtn");
 const statsBtn = document.getElementById("statsBtn");
 const labBtn = document.getElementById("labBtn");
 const rngArenaBtn = document.getElementById("rngArenaBtn");
+const gierkiBtn = document.getElementById("gierkiBtn");
 const csvFile = document.getElementById("csvFile");
 euroBtn.addEventListener("click", () => {
 
@@ -439,6 +440,11 @@ labBtn.addEventListener("click", () => {
 rngArenaBtn?.addEventListener("click", () => {
     showRngArena(getCurrentGameKey());
 });
+
+gierkiBtn?.addEventListener("click", () => {
+    showLottoForgeGamesHub();
+});
+
 function detectCsvDelimiter(line) {
     const candidates = [";", "\t", ","];
     return candidates
@@ -588,7 +594,7 @@ const contentArea = document.getElementById("contentArea");
 
 function showGame(){
 stopRngArena();
-contentArea.classList.remove("stats-view", "lab-view", "rng-arena-view");
+contentArea.classList.remove("stats-view", "lab-view", "rng-arena-view", "gierki-view");
 const labels = currentGame.ranges.map((value, index) => {
 
     const start = index === 0
@@ -6568,7 +6574,7 @@ function initializeStatsDashboard() {
 function pokazStatystyki() {
     stopRngArena();
 
-    contentArea.classList.remove("lab-view", "rng-arena-view");
+    contentArea.classList.remove("lab-view", "rng-arena-view", "gierki-view");
 
     // Widok statystyk korzysta z własnego układu kolumnowego.
     // Bez tego #contentArea (flex w generatorze) rozciągał panele na całą wysokość ekranu.
@@ -8157,7 +8163,7 @@ function showLaboratory(gameKey = null) {
     const config = getLaboratoryConfig(laboratoryGameKey);
     currentGame = games[laboratoryGameKey];
 
-    contentArea.classList.remove("stats-view", "rng-arena-view");
+    contentArea.classList.remove("stats-view", "rng-arena-view", "gierki-view");
     contentArea.classList.add("lab-view");
 
     resolveLaboratoryEntries(laboratoryGameKey);
@@ -10239,7 +10245,7 @@ function showRngArena(gameKey = null, forcedPickCount = null, forcedSecondaryPic
         : Infinity;
     rngArenaGenerateQuickPick(false);
 
-    contentArea.classList.remove("stats-view", "lab-view");
+    contentArea.classList.remove("stats-view", "lab-view", "gierki-view");
     contentArea.classList.add("rng-arena-view");
     contentArea.innerHTML = `
         <div id="rngArenaRoot" class="rng-arena-root">
@@ -10365,6 +10371,977 @@ function showRngArena(gameKey = null, forcedPickCount = null, forcedSecondaryPic
     bindRngArenaEvents();
     renderRngArenaLive();
 }
+
+
+/* =========================================================
+   LOTTOFORGE — GIERKI / FRUIT JACKPOT
+   Mechanika inspirowana Juicy Wins: dokładny rozkład 97 stopni
+   pierwszej transzy + klastry 3+ stykające się bokami.
+   Grafika, nazwa i animacje są własne. Wszystko wyłącznie wirtualne.
+   ========================================================= */
+const FRUIT_FORGE_TOTAL_TICKETS = 10000000;
+const FRUIT_FORGE_WINNING_TICKETS = 2500000;
+const FRUIT_FORGE_START_CREDITS = 10000;
+const FRUIT_FORGE_STAKES = [1, 2, 5, 10, 20, 30, 50];
+const FRUIT_FORGE_GRID_SIZE = 5;
+const FRUIT_FORGE_SYMBOLS = ["🍒", "🍋", "🍇", "🍉", "🍊", "🍓", "🥝"];
+const FRUIT_FORGE_AUTO_COUNTS = [10, 25, 50, 100, 250, 500];
+const FRUIT_FORGE_AUTO_SPEEDS = [
+    { value: 1, label: "1× — spokojnie", delay: 700 },
+    { value: 2, label: "2× — szybciej", delay: 360 },
+    { value: 5, label: "5× — szybko", delay: 160 },
+    { value: 10, label: "10× — turbo", delay: 85 }
+];
+const FRUIT_FORGE_AUTO_STOP_MULTIPLIERS = [
+    { value: 5, label: "5× stawki" },
+    { value: 10, label: "10× stawki" },
+    { value: 20, label: "20× stawki" },
+    { value: 50, label: "50× stawki" },
+    { value: 100, label: "100× stawki" },
+    { value: 500, label: "500× stawki" }
+];
+
+// Stopień, liczba wygranych przy stawce 1 zł, wartość przy stawce 1 zł.
+// Stopnie 2-97 skalują się liniowo ze stawką. Stopień 1 ma zawsze 100 000 zł
+// bazowej wygranej. Liczba losów stopnia 1/96/97 zmienia się zależnie od stawki.
+const FRUIT_FORGE_BASE_TIERS = [
+    [1,2,100000],[2,5,300],[3,5,250],[4,5,150],[5,5,125],[6,500,100],[7,100,75],[8,50,65],[9,100,60],[10,150,55],
+    [11,25,53],[12,25,52],[13,25,51],[14,25,50.5],[15,25,50.2],[16,25,50.1],[17,3750,50],[18,50,47.5],[19,50,47.1],[20,500,47],
+    [21,100,45.5],[22,1000,45],[23,1250,40],[24,250,37.5],[25,250,37.2],[26,250,37],[27,1000,35],[28,250,32.5],[29,150,32.2],[30,150,32.1],
+    [31,500,32],[32,125,30.5],[33,125,30.2],[34,7500,30],[35,2500,28],[36,1250,27.5],[37,500,27.2],[38,125,27.1],[39,2500,27],[40,5000,26],
+    [41,1000,25.5],[42,1000,25.2],[43,100,25.1],[44,2500,25],[45,1500,22.5],[46,1000,22.2],[47,500,22],[48,20000,20],[49,5000,18],[50,2500,17.5],
+    [51,750,17.2],[52,750,17.1],[53,5000,17],[54,5000,16],[55,1250,15.5],[56,500,15.2],[57,500,15.1],[58,20000,15],[59,2000,14],[60,2000,13],
+    [61,10000,12.5],[62,2500,12.2],[63,2500,12.1],[64,10000,12],[65,5000,11],[66,2500,10.5],[67,1250,10.2],[68,1250,10.1],[69,50000,10],[70,5000,9],
+    [71,10000,8],[72,7500,7.5],[73,2500,7.2],[74,2500,7.1],[75,10000,7],[76,5000,6.5],[77,2500,6.2],[78,2500,6.1],[79,10000,6],[80,5000,5.5],
+    [81,2500,5.2],[82,2500,5.1],[83,40000,5],[84,10000,4.5],[85,5000,4.2],[86,2500,4.1],[87,20000,4],[88,2500,3.5],[89,2500,3.2],[90,2500,3.1],
+    [91,25000,3],[92,50000,2.5],[93,10000,2.2],[94,10000,2.1],[95,100000,2],[96,740084,1.5],[97,1224369,1]
+];
+
+const FRUIT_FORGE_COUNT_OVERRIDES = {
+    1:  {1:2,   96:740084, 97:1224369},
+    2:  {1:4,   96:740088, 97:1224363},
+    5:  {1:10,  96:740100, 97:1224345},
+    10: {1:20,  96:724120, 97:1240315},
+    20: {1:40,  96:724160, 97:1240255},
+    30: {1:60,  96:724200, 97:1240195},
+    50: {1:100, 96:724280, 97:1240075}
+};
+
+let fruitForgeAutoTimer = null;
+let fruitForgeAudioContext = null;
+const FRUIT_FORGE_PROGRESSIVE_STORAGE_KEY = "lottoforge-fruit-jackpot-progressive-v1";
+let fruitForgeState = createFruitForgeState();
+
+function loadFruitForgeProgressiveState() {
+    try {
+        const raw = localStorage.getItem(FRUIT_FORGE_PROGRESSIVE_STORAGE_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        return {
+            specialPool: Math.max(0, Number(parsed?.specialPool || 0)),
+            lastSpecialPaid: Math.max(0, Number(parsed?.lastSpecialPaid || 0))
+        };
+    } catch (error) {
+        return null;
+    }
+}
+
+function saveFruitForgeProgressiveState() {
+    try {
+        localStorage.setItem(FRUIT_FORGE_PROGRESSIVE_STORAGE_KEY, JSON.stringify({
+            specialPool: Number(fruitForgeState?.specialPool || 0),
+            lastSpecialPaid: Number(fruitForgeState?.lastSpecialPaid || 0)
+        }));
+    } catch (error) {
+        // Brak localStorage nie blokuje samej gry.
+    }
+}
+
+(function hydrateFruitForgeProgressiveState(){
+    const saved = loadFruitForgeProgressiveState();
+    if (!saved) return;
+    fruitForgeState.specialPool = saved.specialPool;
+    fruitForgeState.lastSpecialPaid = saved.lastSpecialPaid;
+})();
+
+function createFruitForgeState(previousStake = 1) {
+    return {
+        stake: FRUIT_FORGE_STAKES.includes(Number(previousStake)) ? Number(previousStake) : 1,
+        credits: FRUIT_FORGE_START_CREDITS,
+        plays: 0,
+        wins: 0,
+        spent: 0,
+        returned: 0,
+        bestWin: 0,
+        specialPool: 0,
+        lastSpecialPaid: 0,
+        lastOutcome: null,
+        lastTotalPrize: 0,
+        lastBoard: [],
+        lastHitCells: new Set(),
+        lastClusterSize: 0,
+        history: [],
+        animating: false,
+        autoRunning: false,
+        autoTarget: 50,
+        autoCompleted: 0,
+        autoSpeed: 5,
+        autoStartedAt: null,
+        autoStopReason: "",
+        autoStopOnBigWin: true,
+        autoStopMultiplier: 10,
+        autoStopPrize: 0,
+        soundEnabled: true,
+        autoBaseSpent: 0,
+        autoBaseReturned: 0,
+        autoBaseWins: 0
+    };
+}
+
+function getFruitForgeTiers(stake = fruitForgeState.stake) {
+    const safeStake = FRUIT_FORGE_STAKES.includes(Number(stake)) ? Number(stake) : 1;
+    const overrides = FRUIT_FORGE_COUNT_OVERRIDES[safeStake] || FRUIT_FORGE_COUNT_OVERRIDES[1];
+    return FRUIT_FORGE_BASE_TIERS.map(([degree, baseCount, basePrize]) => ({
+        degree,
+        count: Number(overrides[degree] ?? baseCount),
+        prize: degree === 1 ? 100000 : Number((basePrize * safeStake).toFixed(2))
+    }));
+}
+
+function validateFruitForgePaytables() {
+    for (const stake of FRUIT_FORGE_STAKES) {
+        const tiers = getFruitForgeTiers(stake);
+        const wins = tiers.reduce((sum, tier) => sum + tier.count, 0);
+        if (wins !== FRUIT_FORGE_WINNING_TICKETS) {
+            console.error(`Fruit Jackpot: błędna tabela dla ${stake} zł — ${wins} wygranych.`);
+            return false;
+        }
+    }
+    return true;
+}
+validateFruitForgePaytables();
+
+function getFruitForgePayoutRate(stake = fruitForgeState.stake) {
+    const payout = getFruitForgeTiers(stake).reduce((sum, tier) => sum + tier.count * tier.prize, 0);
+    return payout / (FRUIT_FORGE_TOTAL_TICKETS * Number(stake));
+}
+
+function getFruitForgeJackpotOdds(stake = fruitForgeState.stake) {
+    const tier = getFruitForgeTiers(stake).find(item => item.degree === 1);
+    return tier ? FRUIT_FORGE_TOTAL_TICKETS / tier.count : Infinity;
+}
+
+function formatFruitForgeNumber(value, maximumFractionDigits = 2) {
+    return Number(value || 0).toLocaleString("pl-PL", { maximumFractionDigits });
+}
+
+function formatFruitForgeCredits(value) {
+    return `${Number(value || 0).toLocaleString("pl-PL", { minimumFractionDigits: 0, maximumFractionDigits: 2 })} zł`;
+}
+
+function formatFruitForgeOdds(value) {
+    if (!Number.isFinite(value)) return "—";
+    return `1 : ${Number(value).toLocaleString("pl-PL", { maximumFractionDigits: value < 100 ? 2 : 0 })}`;
+}
+
+function sampleFruitForgeOutcome(stake = fruitForgeState.stake) {
+    const ticketPosition = cryptoRandomInt(1, FRUIT_FORGE_TOTAL_TICKETS);
+    let cumulative = 0;
+    for (const tier of getFruitForgeTiers(stake)) {
+        cumulative += tier.count;
+        if (ticketPosition <= cumulative) {
+            return { ...tier, ticketPosition };
+        }
+    }
+    return null;
+}
+
+function getFruitForgeNeighbors(index, size = FRUIT_FORGE_GRID_SIZE) {
+    const row = Math.floor(index / size);
+    const col = index % size;
+    const result = [];
+    if (row > 0) result.push(index - size);
+    if (row < size - 1) result.push(index + size);
+    if (col > 0) result.push(index - 1);
+    if (col < size - 1) result.push(index + 1);
+    return result;
+}
+
+function getFruitForgeClusters(board, size = FRUIT_FORGE_GRID_SIZE) {
+    const visited = new Set();
+    const clusters = [];
+    board.forEach((symbol, start) => {
+        if (visited.has(start)) return;
+        const queue = [start];
+        const cells = [];
+        visited.add(start);
+        while (queue.length) {
+            const index = queue.shift();
+            cells.push(index);
+            for (const neighbor of getFruitForgeNeighbors(index, size)) {
+                if (!visited.has(neighbor) && board[neighbor] === symbol) {
+                    visited.add(neighbor);
+                    queue.push(neighbor);
+                }
+            }
+        }
+        clusters.push({ symbol, cells });
+    });
+    return clusters;
+}
+
+function makeFruitForgeNonWinningBoard(size = FRUIT_FORGE_GRID_SIZE) {
+    const cells = size * size;
+    for (let attempt = 0; attempt < 220; attempt++) {
+        const board = Array.from({ length: cells }, () => FRUIT_FORGE_SYMBOLS[cryptoRandomInt(0, FRUIT_FORGE_SYMBOLS.length - 1)]);
+        if (!getFruitForgeClusters(board, size).some(cluster => cluster.cells.length >= 3)) return board;
+    }
+
+    // Fallback gwarantujący brak klastra 3+.
+    return Array.from({ length: cells }, (_, index) => {
+        const row = Math.floor(index / size);
+        const col = index % size;
+        return FRUIT_FORGE_SYMBOLS[(row * 2 + col * 3) % FRUIT_FORGE_SYMBOLS.length];
+    });
+}
+
+function getFruitForgeVisualClusterTarget(degree) {
+    if (degree === 1) return 10;
+    if (degree <= 5) return 8;
+    if (degree <= 17) return 7;
+    if (degree <= 34) return 6;
+    if (degree <= 58) return 5;
+    if (degree <= 82) return 4;
+    return 3;
+}
+
+function makeFruitForgeConnectedCells(targetSize, size = FRUIT_FORGE_GRID_SIZE) {
+    const total = size * size;
+    const start = cryptoRandomInt(0, total - 1);
+    const chosen = new Set([start]);
+    const frontier = [start];
+
+    while (chosen.size < targetSize && frontier.length) {
+        const seed = frontier[cryptoRandomInt(0, frontier.length - 1)];
+        const available = getFruitForgeNeighbors(seed, size).filter(index => !chosen.has(index));
+        if (!available.length) {
+            frontier.splice(frontier.indexOf(seed), 1);
+            continue;
+        }
+        const next = available[cryptoRandomInt(0, available.length - 1)];
+        chosen.add(next);
+        frontier.push(next);
+    }
+    return [...chosen];
+}
+
+function makeFruitForgeBoard(outcome, size = FRUIT_FORGE_GRID_SIZE) {
+    const board = makeFruitForgeNonWinningBoard(size);
+    if (!outcome) return { board, hitCells: new Set(), clusterSize: 0 };
+
+    const targetSize = getFruitForgeVisualClusterTarget(outcome.degree);
+    const chosen = makeFruitForgeConnectedCells(targetSize, size);
+    const symbol = FRUIT_FORGE_SYMBOLS[cryptoRandomInt(0, FRUIT_FORGE_SYMBOLS.length - 1)];
+    chosen.forEach(index => { board[index] = symbol; });
+
+    // Jeżeli sąsiednia komórka przypadkiem ma ten sam symbol, cały faktyczny klaster
+    // też podświetlamy — dokładnie według zasady stykania bokami.
+    const cluster = getFruitForgeClusters(board, size)
+        .filter(item => item.symbol === symbol && item.cells.some(index => chosen.includes(index)))
+        .sort((a, b) => b.cells.length - a.cells.length)[0] || { cells: chosen };
+
+    return { board, hitCells: new Set(cluster.cells), clusterSize: cluster.cells.length };
+}
+
+function renderFruitForgeBoard() {
+    const boardHost = document.getElementById("fruitForgeBoard");
+    if (!boardHost) return;
+    const board = fruitForgeState.lastBoard.length
+        ? fruitForgeState.lastBoard
+        : makeFruitForgeNonWinningBoard();
+
+    boardHost.innerHTML = board.map((symbol, index) => {
+        const row = Math.floor(index / FRUIT_FORGE_GRID_SIZE);
+        const col = index % FRUIT_FORGE_GRID_SIZE;
+        const isHit = fruitForgeState.lastHitCells.has(index);
+        return `
+            <div class="fruit-forge-cell ${isHit ? "hit" : ""}" style="--cell-delay:${(row * 48) + (col * 22)}ms">
+                <span>${symbol}</span>
+            </div>
+        `;
+    }).join("");
+}
+
+function renderFruitForgeJackpotMeter() {
+    const host = document.getElementById("fruitForgeJackpotMeter");
+    if (!host) return;
+
+    const baseJackpot = 100000;
+    const progressiveBonus = Number(fruitForgeState.specialPool || 0);
+    const progressiveJackpot = Number((baseJackpot + progressiveBonus).toFixed(2));
+    const nextContribution = Number((Number(fruitForgeState.stake || 1) * 0.02).toFixed(2));
+    const lastPaid = Number(fruitForgeState.lastSpecialPaid || 0);
+
+    host.innerHTML = `
+        <div class="fruit-forge-progressive-main">
+            <span>💎 PROGRESYWNY JACKPOT</span>
+            <strong>${formatFruitForgeCredits(progressiveJackpot)}</strong>
+            <small>100 000 zł bazowo + aktualny bonus specjalny 2%</small>
+        </div>
+        <div class="fruit-forge-progressive-breakdown">
+            <div><span>Baza</span><b>${formatFruitForgeCredits(baseJackpot)}</b></div>
+            <div><span>Bonus teraz</span><b>+${formatFruitForgeCredits(progressiveBonus)}</b></div>
+            <div><span>Następna gra dopisze</span><b>+${formatFruitForgeCredits(nextContribution)}</b></div>
+            <div><span>Ostatnio wypłacony bonus</span><b>${lastPaid > 0 ? `+${formatFruitForgeCredits(lastPaid)}` : "—"}</b></div>
+        </div>
+        <div class="fruit-forge-progressive-note">
+            Symulacja lokalna LottoForge: do wspólnej puli trafia 2% każdej wirtualnej stawki, niezależnie od wybranej stawki.
+            Gdy padnie 1. stopień, dostajesz 100 000 zł + całą widoczną pulę bonusową, a bonus startuje ponownie od 0 zł.
+        </div>
+    `;
+}
+
+function renderFruitForgeResult() {
+    const host = document.getElementById("fruitForgeResult");
+    if (!host) return;
+    const outcome = fruitForgeState.lastOutcome;
+
+    if (fruitForgeState.plays === 0) {
+        host.className = "fruit-forge-result empty";
+        host.innerHTML = `<strong>🍓 Gotowy do gry</strong><span>Wybierz stawkę i uruchom los. Plansza ma 5 × 5 pól.</span>`;
+        return;
+    }
+
+    if (!outcome) {
+        host.className = "fruit-forge-result loss";
+        host.innerHTML = `<strong>Brak wygranej</strong><span>Nie powstał klaster minimum 3 identycznych symboli połączonych bokiem.</span>`;
+        return;
+    }
+
+    const odds = FRUIT_FORGE_TOTAL_TICKETS / outcome.count;
+    const bonusText = fruitForgeState.lastSpecialPaid > 0
+        ? ` • bonus 2%: +${formatFruitForgeCredits(fruitForgeState.lastSpecialPaid)}`
+        : "";
+    host.className = `fruit-forge-result win ${outcome.degree <= 6 ? "big" : ""} ${outcome.degree === 1 ? "jackpot" : ""}`;
+    host.innerHTML = `
+        <span>${outcome.degree === 1 ? "💎 JACKPOT" : "🏆 WYGRANA"} • STOPIEŃ ${outcome.degree}</span>
+        <strong>+${formatFruitForgeCredits(fruitForgeState.lastTotalPrize)}</strong>
+        <small>Klaster: ${fruitForgeState.lastClusterSize} symboli • ${formatFruitForgeOdds(odds)} • ${formatFruitForgeNumber(outcome.count, 0)} wygranych / 10 000 000${bonusText}</small>
+    `;
+}
+
+function renderFruitForgeStats() {
+    const balance = document.getElementById("fruitForgeBalance");
+    const plays = document.getElementById("fruitForgePlays");
+    const wins = document.getElementById("fruitForgeWins");
+    const sessionReturn = document.getElementById("fruitForgeReturn");
+    const best = document.getElementById("fruitForgeBest");
+    const spent = document.getElementById("fruitForgeSpent");
+    const returned = document.getElementById("fruitForgeReturned");
+    const net = document.getElementById("fruitForgeNet");
+    if (balance) balance.textContent = formatFruitForgeCredits(fruitForgeState.credits);
+    if (plays) plays.textContent = formatFruitForgeNumber(fruitForgeState.plays, 0);
+    if (wins) wins.textContent = `${formatFruitForgeNumber(fruitForgeState.wins, 0)} (${fruitForgeState.plays ? formatFruitForgeNumber(fruitForgeState.wins / fruitForgeState.plays * 100, 2) : "0"}%)`;
+    if (spent) spent.textContent = formatFruitForgeCredits(fruitForgeState.spent);
+    if (returned) returned.textContent = formatFruitForgeCredits(fruitForgeState.returned);
+    if (net) {
+        const netValue = Number((fruitForgeState.returned - fruitForgeState.spent).toFixed(2));
+        net.textContent = `${netValue > 0 ? "+" : ""}${formatFruitForgeCredits(netValue)}`;
+        net.classList.toggle("positive", netValue > 0);
+        net.classList.toggle("negative", netValue < 0);
+    }
+    if (sessionReturn) sessionReturn.textContent = fruitForgeState.spent > 0
+        ? `${formatFruitForgeNumber(fruitForgeState.returned / fruitForgeState.spent * 100, 2)}%`
+        : "—";
+    if (best) best.textContent = formatFruitForgeCredits(fruitForgeState.bestWin);
+    renderFruitForgeJackpotMeter();
+}
+
+function renderFruitForgeHistory() {
+    const host = document.getElementById("fruitForgeHistory");
+    if (!host) return;
+    if (!fruitForgeState.history.length) {
+        host.innerHTML = `<div class="fruit-forge-history-empty">Tu pojawi się 12 ostatnich gier.</div>`;
+        return;
+    }
+    host.innerHTML = fruitForgeState.history.map(item => `
+        <div class="fruit-forge-history-row ${item.degree ? "win" : "loss"} ${item.degree === 1 ? "jackpot" : ""}">
+            <span>#${item.play}</span>
+            <strong>${item.degree ? `Stopień ${item.degree}` : "brak"}</strong>
+            <b>${item.degree ? `+${formatFruitForgeCredits(item.prize)}` : `-${formatFruitForgeCredits(item.stake)}`}</b>
+        </div>
+    `).join("");
+}
+
+function renderFruitForgeReference() {
+    const host = document.getElementById("fruitForgeReference");
+    if (!host) return;
+    const stake = fruitForgeState.stake;
+    const tiers = getFruitForgeTiers(stake);
+    const jackpotOdds = getFruitForgeJackpotOdds(stake);
+    const payoutRate = getFruitForgePayoutRate(stake) * 100;
+
+    host.innerHTML = `
+        <div class="fruit-forge-reference-cards">
+            <div><span>Dowolna wygrana</span><strong>1 : 4</strong><small>2 500 000 z 10 000 000 losów</small></div>
+            <div><span>1. stopień</span><strong>${formatFruitForgeOdds(jackpotOdds)}</strong><small>100 000 zł + widoczny progresywny bonus 2%</small></div>
+            <div><span>Zwrot bazowej tabeli</span><strong>${formatFruitForgeNumber(payoutRate, 2)}%</strong><small>bez bonusu specjalnego, liczony względem pełnej wirtualnej stawki</small></div>
+            <div><span>Stopnie</span><strong>97</strong><small>stawka ${stake} zł • transza 10 mln</small></div>
+        </div>
+        <div class="fruit-forge-table-wrap">
+            <table class="fruit-forge-odds-table">
+                <thead><tr><th>Stopień</th><th>Liczba / 10 mln</th><th>Wygrana bazowa</th><th>Szansa</th><th>%</th></tr></thead>
+                <tbody>
+                    ${tiers.map(tier => `
+                        <tr class="${tier.degree <= 6 ? "top-tier" : ""}">
+                            <td>${tier.degree}</td>
+                            <td>${formatFruitForgeNumber(tier.count, 0)}</td>
+                            <td>${formatFruitForgeCredits(tier.prize)}${tier.degree === 1 ? " + bonus" : ""}</td>
+                            <td>${formatFruitForgeOdds(FRUIT_FORGE_TOTAL_TICKETS / tier.count)}</td>
+                            <td>${formatFruitForgeNumber(tier.count / FRUIT_FORGE_TOTAL_TICKETS * 100, 6)}%</td>
+                        </tr>
+                    `).join("")}
+                </tbody>
+            </table>
+        </div>
+    `;
+}
+
+function getFruitForgeAutoSpeedConfig() {
+    const speed = Number(fruitForgeState.autoSpeed || 5);
+    return FRUIT_FORGE_AUTO_SPEEDS.find(item => item.value === speed) || FRUIT_FORGE_AUTO_SPEEDS[2];
+}
+
+function getFruitForgeAutoStopThreshold() {
+    const multiplier = Number(fruitForgeState.autoStopMultiplier || 10);
+    return Number((Number(fruitForgeState.stake || 1) * multiplier).toFixed(2));
+}
+
+function shouldFruitForgeAutoStopOnWin(result) {
+    if (!fruitForgeState.autoStopOnBigWin || !result?.ok || !result.outcome) return false;
+    return Number(result.totalPrize || 0) >= getFruitForgeAutoStopThreshold();
+}
+
+function getFruitForgeAutoSessionStats() {
+    const spent = Math.max(0, Number(fruitForgeState.spent || 0) - Number(fruitForgeState.autoBaseSpent || 0));
+    const returned = Math.max(0, Number(fruitForgeState.returned || 0) - Number(fruitForgeState.autoBaseReturned || 0));
+    const wins = Math.max(0, Number(fruitForgeState.wins || 0) - Number(fruitForgeState.autoBaseWins || 0));
+    const balance = Number((returned - spent).toFixed(2));
+    const returnPercent = spent > 0 ? (returned / spent) * 100 : 0;
+    return { spent, returned, wins, balance, returnPercent };
+}
+
+function ensureFruitForgeAudio() {
+    if (!fruitForgeState?.soundEnabled) return null;
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return null;
+    if (!fruitForgeAudioContext) fruitForgeAudioContext = new AudioContextClass();
+    if (fruitForgeAudioContext.state === "suspended") {
+        fruitForgeAudioContext.resume().catch(() => {});
+    }
+    return fruitForgeAudioContext;
+}
+
+function fruitForgeTone(ctx, frequency, start, duration, volume = 0.045, type = "sine") {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(frequency, start);
+    gain.gain.setValueAtTime(0.0001, start);
+    gain.gain.exponentialRampToValueAtTime(Math.max(0.0002, volume), start + 0.012);
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(start);
+    osc.stop(start + duration + 0.04);
+}
+
+function playFruitForgeBigWinSound(outcome, totalPrize, stake) {
+    if (!fruitForgeState?.soundEnabled || !outcome) return;
+    const threshold = Number(stake || fruitForgeState.stake || 1) * Number(fruitForgeState.autoStopMultiplier || 10);
+    if (Number(totalPrize || 0) < threshold) return;
+
+    const ctx = ensureFruitForgeAudio();
+    if (!ctx) return;
+    const now = ctx.currentTime + 0.015;
+
+    if (outcome.degree === 1) {
+        [392, 523.25, 659.25, 783.99, 1046.5].forEach((freq, index) => {
+            fruitForgeTone(ctx, freq, now + index * 0.10, 0.24, 0.058, index < 2 ? "triangle" : "sine");
+        });
+        [523.25, 659.25, 783.99, 1046.5].forEach(freq => {
+            fruitForgeTone(ctx, freq, now + 0.56, 0.64, 0.035, "triangle");
+        });
+        return;
+    }
+
+    const notes = Number(totalPrize || 0) >= threshold * 5
+        ? [523.25, 659.25, 783.99, 1046.5]
+        : [523.25, 659.25, 783.99];
+    notes.forEach((freq, index) => {
+        fruitForgeTone(ctx, freq, now + index * 0.10, 0.22, 0.05, "triangle");
+    });
+}
+
+function resolveFruitForgeSpin() {
+    const stake = Number(fruitForgeState.stake || 1);
+    if (fruitForgeState.credits < stake) {
+        return { ok: false, reason: "balance" };
+    }
+
+    fruitForgeState.credits -= stake;
+    fruitForgeState.spent += stake;
+    fruitForgeState.plays++;
+    fruitForgeState.specialPool = Number((fruitForgeState.specialPool + stake * 0.02).toFixed(2));
+
+    const outcome = sampleFruitForgeOutcome(stake);
+    const visual = makeFruitForgeBoard(outcome);
+    let totalPrize = outcome?.prize || 0;
+    let specialPaid = 0;
+
+    if (outcome?.degree === 1) {
+        specialPaid = fruitForgeState.specialPool;
+        totalPrize = Number((totalPrize + specialPaid).toFixed(2));
+        fruitForgeState.specialPool = 0;
+    }
+
+    fruitForgeState.lastOutcome = outcome;
+    fruitForgeState.lastBoard = visual.board;
+    fruitForgeState.lastHitCells = visual.hitCells;
+    fruitForgeState.lastClusterSize = visual.clusterSize;
+    fruitForgeState.lastTotalPrize = totalPrize;
+    fruitForgeState.lastSpecialPaid = specialPaid;
+
+    if (outcome) {
+        fruitForgeState.credits += totalPrize;
+        fruitForgeState.returned += totalPrize;
+        fruitForgeState.wins++;
+        fruitForgeState.bestWin = Math.max(fruitForgeState.bestWin, totalPrize);
+    }
+
+    fruitForgeState.history.unshift({
+        play: fruitForgeState.plays,
+        stake,
+        degree: outcome?.degree || null,
+        prize: totalPrize
+    });
+    fruitForgeState.history = fruitForgeState.history.slice(0, 12);
+
+    saveFruitForgeProgressiveState();
+    playFruitForgeBigWinSound(outcome, totalPrize, stake);
+    return { ok: true, outcome, totalPrize, stake };
+}
+
+function renderFruitForgeAutoControls() {
+    const startBtn = document.getElementById("fruitForgeAutoStartBtn");
+    const stopBtn = document.getElementById("fruitForgeAutoStopBtn");
+    const countSelect = document.getElementById("fruitForgeAutoCount");
+    const speedSelect = document.getElementById("fruitForgeAutoSpeed");
+    const stopToggle = document.getElementById("fruitForgeAutoStopBigWin");
+    const stopMultiplierSelect = document.getElementById("fruitForgeAutoStopMultiplier");
+    const stopThresholdHint = document.getElementById("fruitForgeAutoStopThresholdHint");
+    const soundToggle = document.getElementById("fruitForgeBigWinSound");
+    const stakeSelect = document.getElementById("fruitForgeStake");
+    const status = document.getElementById("fruitForgeAutoStatus");
+    const fill = document.getElementById("fruitForgeAutoProgressFill");
+    const playButton = document.getElementById("fruitForgePlayBtn");
+
+    const running = Boolean(fruitForgeState.autoRunning);
+    const target = Math.max(1, Number(fruitForgeState.autoTarget || 50));
+    const completed = Math.max(0, Number(fruitForgeState.autoCompleted || 0));
+    const progress = Math.max(0, Math.min(100, completed / target * 100));
+
+    if (startBtn) {
+        startBtn.disabled = running || fruitForgeState.animating;
+        startBtn.textContent = running ? "⚡ AUTO DZIAŁA…" : "⚡ START AUTO";
+    }
+    if (stopBtn) stopBtn.disabled = !running;
+    if (countSelect) {
+        countSelect.disabled = running;
+        countSelect.value = String(target);
+    }
+    if (speedSelect) {
+        speedSelect.disabled = running;
+        speedSelect.value = String(fruitForgeState.autoSpeed || 5);
+    }
+    if (stopToggle) {
+        stopToggle.disabled = running;
+        stopToggle.checked = fruitForgeState.autoStopOnBigWin !== false;
+    }
+    if (stopMultiplierSelect) {
+        stopMultiplierSelect.disabled = running || fruitForgeState.autoStopOnBigWin === false;
+        stopMultiplierSelect.value = String(fruitForgeState.autoStopMultiplier || 10);
+    }
+    if (stopThresholdHint) {
+        stopThresholdHint.textContent = fruitForgeState.autoStopOnBigWin === false
+            ? `STOP wyłączony • dźwięk nadal używa progu ${formatFruitForgeCredits(getFruitForgeAutoStopThreshold())}.`
+            : `AUTO zatrzyma się przy wygranej ≥ ${formatFruitForgeCredits(getFruitForgeAutoStopThreshold())}.`;
+    }
+    if (soundToggle) soundToggle.checked = fruitForgeState.soundEnabled !== false;
+
+    const autoSession = getFruitForgeAutoSessionStats();
+    const autoSpent = document.getElementById("fruitForgeAutoSpent");
+    const autoReturned = document.getElementById("fruitForgeAutoReturned");
+    const autoNet = document.getElementById("fruitForgeAutoNet");
+    const autoRtp = document.getElementById("fruitForgeAutoRtp");
+    if (autoSpent) autoSpent.textContent = formatFruitForgeCredits(autoSession.spent);
+    if (autoReturned) autoReturned.textContent = formatFruitForgeCredits(autoSession.returned);
+    if (autoRtp) autoRtp.textContent = autoSession.spent > 0 ? `${formatFruitForgeNumber(autoSession.returnPercent, 2)}%` : "—";
+    if (autoNet) {
+        autoNet.textContent = `${autoSession.balance > 0 ? "+" : ""}${formatFruitForgeCredits(autoSession.balance)}`;
+        autoNet.classList.toggle("positive", autoSession.balance > 0);
+        autoNet.classList.toggle("negative", autoSession.balance < 0);
+    }
+
+    if (stakeSelect) stakeSelect.disabled = running || fruitForgeState.animating;
+    if (playButton) playButton.disabled = running || fruitForgeState.animating;
+    if (fill) fill.style.width = `${progress}%`;
+
+    if (status) {
+        let headline = "AUTO gotowe";
+        let note = `Wybierz liczbę gier i tempo. Każda próba używa dokładnie tego samego losowania Web Crypto i tej samej tabeli 97 stopni co tryb ręczny.`;
+        if (running) {
+            headline = `⚡ AUTO: ${completed} / ${target}`;
+            const bigWinText = fruitForgeState.autoStopOnBigWin !== false
+                ? ` • STOP przy ≥ ${formatFruitForgeCredits(getFruitForgeAutoStopThreshold())}`
+                : "";
+            note = `Tempo ${fruitForgeState.autoSpeed}× • stawka ${fruitForgeState.stake} zł${bigWinText} • koniec po ${target} grach albo przy braku salda.`;
+        } else if (completed > 0) {
+            const reason = fruitForgeState.autoStopReason === "balance"
+                ? "zatrzymano — brak salda na kolejną grę"
+                : fruitForgeState.autoStopReason === "manual"
+                    ? "zatrzymano ręcznie"
+                    : fruitForgeState.autoStopReason === "complete"
+                        ? "sesja ukończona"
+                        : fruitForgeState.autoStopReason === "bigwin"
+                            ? `🛑 DUŻA WYGRANA — ${formatFruitForgeCredits(fruitForgeState.autoStopPrize)}`
+                            : "sesja zatrzymana";
+            headline = `AUTO: ${completed} / ${target} • ${reason}`;
+            note = fruitForgeState.autoStopReason === "bigwin"
+                ? `Trafienie spełniło ustawiony próg ${fruitForgeState.autoStopMultiplier}× stawki. Plansza została zatrzymana dokładnie na tej wygranej.`
+                : `Wygrane w całej sesji: ${fruitForgeState.wins} • saldo: ${formatFruitForgeCredits(fruitForgeState.credits)}.`;
+        }
+        status.innerHTML = `<strong>${headline}</strong><span>${note}</span>`;
+    }
+}
+
+function stopFruitForgeAuto(reason = "manual", shouldRender = true) {
+    if (fruitForgeAutoTimer) {
+        clearTimeout(fruitForgeAutoTimer);
+        fruitForgeAutoTimer = null;
+    }
+    fruitForgeState.autoRunning = false;
+    fruitForgeState.autoStopReason = reason;
+    if (shouldRender && document.getElementById("fruitForgeRoot")) {
+        refreshFruitForgeUi();
+    }
+}
+
+function runFruitForgeAutoStep() {
+    if (!fruitForgeState.autoRunning) return;
+    if (!document.getElementById("fruitForgeRoot")) {
+        stopFruitForgeAuto("navigation", false);
+        return;
+    }
+
+    if (fruitForgeState.autoCompleted >= fruitForgeState.autoTarget) {
+        stopFruitForgeAuto("complete", true);
+        return;
+    }
+
+    const result = resolveFruitForgeSpin();
+    if (!result.ok) {
+        stopFruitForgeAuto("balance", true);
+        return;
+    }
+
+    fruitForgeState.autoCompleted++;
+    refreshFruitForgeUi();
+
+    if (shouldFruitForgeAutoStopOnWin(result)) {
+        fruitForgeState.autoStopPrize = Number(result.totalPrize || 0);
+        stopFruitForgeAuto("bigwin", true);
+        return;
+    }
+
+    if (fruitForgeState.autoCompleted >= fruitForgeState.autoTarget) {
+        stopFruitForgeAuto("complete", true);
+        return;
+    }
+
+    fruitForgeAutoTimer = window.setTimeout(runFruitForgeAutoStep, getFruitForgeAutoSpeedConfig().delay);
+}
+
+function startFruitForgeAuto() {
+    if (fruitForgeState.animating || fruitForgeState.autoRunning) return;
+    ensureFruitForgeAudio();
+
+    const count = Number(document.getElementById("fruitForgeAutoCount")?.value || fruitForgeState.autoTarget || 50);
+    const speed = Number(document.getElementById("fruitForgeAutoSpeed")?.value || fruitForgeState.autoSpeed || 5);
+    fruitForgeState.autoTarget = FRUIT_FORGE_AUTO_COUNTS.includes(count) ? count : 50;
+    fruitForgeState.autoSpeed = FRUIT_FORGE_AUTO_SPEEDS.some(item => item.value === speed) ? speed : 5;
+    fruitForgeState.autoCompleted = 0;
+    fruitForgeState.autoStartedAt = Date.now();
+    fruitForgeState.autoStopReason = "";
+    fruitForgeState.autoStopPrize = 0;
+    fruitForgeState.autoBaseSpent = Number(fruitForgeState.spent || 0);
+    fruitForgeState.autoBaseReturned = Number(fruitForgeState.returned || 0);
+    fruitForgeState.autoBaseWins = Number(fruitForgeState.wins || 0);
+
+    if (fruitForgeState.credits < fruitForgeState.stake) {
+        alert("🍒 Za mało wirtualnych środków na start AUTO. Użyj RESET SALDA albo zmniejsz stawkę.");
+        return;
+    }
+
+    fruitForgeState.autoRunning = true;
+    refreshFruitForgeUi();
+    runFruitForgeAutoStep();
+}
+
+function refreshFruitForgeUi() {
+    renderFruitForgeBoard();
+    renderFruitForgeResult();
+    renderFruitForgeStats();
+    renderFruitForgeHistory();
+    renderFruitForgeReference();
+    const playButton = document.getElementById("fruitForgePlayBtn");
+    if (playButton) {
+        playButton.textContent = fruitForgeState.animating ? "🍒 LOSOWANIE…" : `🍒 ZAGRAJ • ${fruitForgeState.stake} zł`;
+        playButton.disabled = fruitForgeState.animating || fruitForgeState.autoRunning;
+    }
+    renderFruitForgeAutoControls();
+}
+
+function playFruitForge() {
+    if (fruitForgeState.animating || fruitForgeState.autoRunning) return;
+    ensureFruitForgeAudio();
+    const stake = Number(fruitForgeState.stake || 1);
+    if (fruitForgeState.credits < stake) {
+        alert("🍒 Za mało wirtualnych środków. Użyj przycisku RESET SALDA.");
+        return;
+    }
+
+    fruitForgeState.animating = true;
+    refreshFruitForgeUi();
+
+    // Wynik jest ustalany przez ten sam silnik co AUTO. Zwłoka służy tylko animacji planszy.
+    window.setTimeout(() => {
+        const result = resolveFruitForgeSpin();
+        fruitForgeState.animating = false;
+        if (!result.ok) {
+            alert("🍒 Za mało wirtualnych środków. Użyj przycisku RESET SALDA.");
+        }
+        refreshFruitForgeUi();
+    }, 150);
+}
+
+function resetFruitForge() {
+    if (fruitForgeState.animating) return;
+    stopFruitForgeAuto("manual", false);
+    const currentStake = fruitForgeState.stake;
+    const autoTarget = fruitForgeState.autoTarget;
+    const autoSpeed = fruitForgeState.autoSpeed;
+    const autoStopOnBigWin = fruitForgeState.autoStopOnBigWin;
+    const autoStopMultiplier = fruitForgeState.autoStopMultiplier;
+    const soundEnabled = fruitForgeState.soundEnabled;
+    const progressivePool = Number(fruitForgeState.specialPool || 0);
+    const lastSpecialPaid = Number(fruitForgeState.lastSpecialPaid || 0);
+    fruitForgeState = createFruitForgeState(currentStake);
+    fruitForgeState.autoTarget = autoTarget;
+    fruitForgeState.autoSpeed = autoSpeed;
+    fruitForgeState.autoStopOnBigWin = autoStopOnBigWin;
+    fruitForgeState.autoStopMultiplier = autoStopMultiplier;
+    fruitForgeState.soundEnabled = soundEnabled;
+    // RESET SALDA nie zeruje progresywnego jackpota — to osobna, wspólna pula symulacji.
+    fruitForgeState.specialPool = progressivePool;
+    fruitForgeState.lastSpecialPaid = lastSpecialPaid;
+    saveFruitForgeProgressiveState();
+    refreshFruitForgeUi();
+}
+
+function bindFruitForgeEvents() {
+    document.getElementById("fruitForgeStake")?.addEventListener("change", event => {
+        if (fruitForgeState.animating || fruitForgeState.autoRunning) return;
+        fruitForgeState.stake = Number(event.target.value);
+        refreshFruitForgeUi();
+    });
+    document.getElementById("fruitForgeAutoCount")?.addEventListener("change", event => {
+        if (fruitForgeState.autoRunning) return;
+        fruitForgeState.autoTarget = Number(event.target.value);
+        fruitForgeState.autoCompleted = 0;
+        fruitForgeState.autoStopReason = "";
+        renderFruitForgeAutoControls();
+    });
+    document.getElementById("fruitForgeAutoSpeed")?.addEventListener("change", event => {
+        if (fruitForgeState.autoRunning) return;
+        fruitForgeState.autoSpeed = Number(event.target.value);
+        renderFruitForgeAutoControls();
+    });
+    document.getElementById("fruitForgeAutoStopBigWin")?.addEventListener("change", event => {
+        if (fruitForgeState.autoRunning) return;
+        fruitForgeState.autoStopOnBigWin = Boolean(event.target.checked);
+        fruitForgeState.autoStopReason = "";
+        fruitForgeState.autoStopPrize = 0;
+        renderFruitForgeAutoControls();
+    });
+    document.getElementById("fruitForgeAutoStopMultiplier")?.addEventListener("change", event => {
+        if (fruitForgeState.autoRunning) return;
+        const value = Number(event.target.value);
+        fruitForgeState.autoStopMultiplier = FRUIT_FORGE_AUTO_STOP_MULTIPLIERS.some(item => item.value === value) ? value : 10;
+        fruitForgeState.autoStopReason = "";
+        fruitForgeState.autoStopPrize = 0;
+        renderFruitForgeAutoControls();
+    });
+    document.getElementById("fruitForgeBigWinSound")?.addEventListener("change", event => {
+        fruitForgeState.soundEnabled = Boolean(event.target.checked);
+        if (fruitForgeState.soundEnabled) ensureFruitForgeAudio();
+        renderFruitForgeAutoControls();
+    });
+    document.getElementById("fruitForgePlayBtn")?.addEventListener("click", playFruitForge);
+    document.getElementById("fruitForgeAutoStartBtn")?.addEventListener("click", startFruitForgeAuto);
+    document.getElementById("fruitForgeAutoStopBtn")?.addEventListener("click", () => stopFruitForgeAuto("manual", true));
+    document.getElementById("fruitForgeResetBtn")?.addEventListener("click", resetFruitForge);
+}
+
+function showLottoForgeGamesHub() {
+    stopRngArena();
+    contentArea.classList.remove("stats-view", "lab-view", "rng-arena-view");
+    contentArea.classList.add("gierki-view");
+    contentArea.innerHTML = `
+        <div id="fruitForgeRoot" class="lottoforge-games-root">
+            <section class="fruit-forge-hero">
+                <div>
+                    <span class="fruit-forge-kicker">LOTTOFORGE • GIERKI • WIRTUALNY SYMULATOR</span>
+                    <h1>🍒 Fruit Jackpot</h1>
+                    <p>Własna wersja gierki klastrowej z zasadą jak w Juicy Wins: stawki 1-50 zł, klastry minimum 3 identycznych symboli połączonych bokiem oraz dokładny rozkład 97 stopni pierwszej transzy. Nazwa, grafika i animacje są własne.</p>
+                </div>
+                <div class="fruit-forge-source-badge">
+                    <strong>MODEL 1:1 TABELI WYGRANYCH</strong>
+                    <span>10 000 000 losów / stawkę</span>
+                    <small>2 500 000 wygrywających • 25%</small>
+                </div>
+            </section>
+
+            <section class="fruit-forge-dashboard">
+                <div class="fruit-forge-stat primary"><span>Saldo</span><strong id="fruitForgeBalance"></strong><small>wyłącznie wirtualne zł</small></div>
+                <div class="fruit-forge-stat"><span>Gry</span><strong id="fruitForgePlays"></strong></div>
+                <div class="fruit-forge-stat"><span>Wygrane</span><strong id="fruitForgeWins"></strong></div>
+                <div class="fruit-forge-stat"><span>Wydano</span><strong id="fruitForgeSpent"></strong><small>od ostatniego resetu</small></div>
+                <div class="fruit-forge-stat"><span>Wygrano</span><strong id="fruitForgeReturned"></strong><small>suma wypłat</small></div>
+                <div class="fruit-forge-stat net"><span>Bilans</span><strong id="fruitForgeNet"></strong><small>wygrano − wydano</small></div>
+                <div class="fruit-forge-stat"><span>Zwrot sesji</span><strong id="fruitForgeReturn"></strong></div>
+                <div class="fruit-forge-stat"><span>Najlepsza</span><strong id="fruitForgeBest"></strong></div>
+            </section>
+
+            <section class="fruit-forge-machine">
+                <div id="fruitForgeJackpotMeter" class="fruit-forge-jackpot-meter"></div>
+
+                <div class="fruit-forge-machine-body">
+                    <div class="fruit-forge-stage">
+                        <div class="fruit-forge-stage-head">
+                            <div><span>KLASTRY 3+</span><strong>Połącz identyczne owoce bokiem</strong></div>
+                            <small>siatka 5 × 5</small>
+                        </div>
+                        <div id="fruitForgeBoard" class="fruit-forge-board" aria-label="Plansza Fruit Jackpot"></div>
+                        <div id="fruitForgeResult" class="fruit-forge-result empty"></div>
+                    </div>
+
+                    <aside class="fruit-forge-controls">
+                        <div class="fruit-forge-control-title"><span>🎟️ STAWKA</span><strong>Wybierz cenę wirtualnego losu</strong></div>
+                        <label>Stawka
+                            <select id="fruitForgeStake">
+                                ${FRUIT_FORGE_STAKES.map(stake => `<option value="${stake}" ${stake === fruitForgeState.stake ? "selected" : ""}>${stake} zł</option>`).join("")}
+                            </select>
+                        </label>
+                        <button id="fruitForgePlayBtn" class="primary-btn fruit-forge-play-btn"></button>
+
+                        <section class="fruit-forge-auto-panel">
+                            <div class="fruit-forge-auto-head">
+                                <span>⚡ AUTO MODE</span>
+                                <strong>Puść serię automatycznych gier</strong>
+                            </div>
+                            <div class="fruit-forge-auto-grid">
+                                <label>Liczba gier
+                                    <select id="fruitForgeAutoCount">
+                                        ${FRUIT_FORGE_AUTO_COUNTS.map(value => `<option value="${value}" ${value === fruitForgeState.autoTarget ? "selected" : ""}>${value} gier</option>`).join("")}
+                                    </select>
+                                </label>
+                                <label>Tempo
+                                    <select id="fruitForgeAutoSpeed">
+                                        ${FRUIT_FORGE_AUTO_SPEEDS.map(item => `<option value="${item.value}" ${item.value === fruitForgeState.autoSpeed ? "selected" : ""}>${item.label}</option>`).join("")}
+                                    </select>
+                                </label>
+                            </div>
+                            <div class="fruit-forge-auto-bigwin">
+                                <label class="fruit-forge-auto-bigwin-toggle">
+                                    <input id="fruitForgeAutoStopBigWin" type="checkbox" ${fruitForgeState.autoStopOnBigWin !== false ? "checked" : ""}>
+                                    <span>🛑 Zatrzymaj AUTO po dużej wygranej</span>
+                                </label>
+                                <label>Próg dużej wygranej
+                                    <select id="fruitForgeAutoStopMultiplier">
+                                        ${FRUIT_FORGE_AUTO_STOP_MULTIPLIERS.map(item => `<option value="${item.value}" ${item.value === fruitForgeState.autoStopMultiplier ? "selected" : ""}>${item.label}</option>`).join("")}
+                                    </select>
+                                    <small id="fruitForgeAutoStopThresholdHint"></small>
+                                </label>
+                                <label class="fruit-forge-auto-bigwin-toggle fruit-forge-sound-toggle">
+                                    <input id="fruitForgeBigWinSound" type="checkbox" ${fruitForgeState.soundEnabled !== false ? "checked" : ""}>
+                                    <span>🔊 Dźwięk przy dużej wygranej</span>
+                                </label>
+                            </div>
+
+                            <div class="fruit-forge-auto-live">
+                                <div><span>Wydano w AUTO</span><strong id="fruitForgeAutoSpent">0 zł</strong></div>
+                                <div><span>Wygrano w AUTO</span><strong id="fruitForgeAutoReturned">0 zł</strong></div>
+                                <div><span>Bilans AUTO</span><strong id="fruitForgeAutoNet">0 zł</strong></div>
+                                <div><span>Zwrot AUTO</span><strong id="fruitForgeAutoRtp">—</strong></div>
+                            </div>
+
+                            <div class="fruit-forge-auto-actions">
+                                <button id="fruitForgeAutoStartBtn" class="primary-btn fruit-forge-auto-start-btn">⚡ START AUTO</button>
+                                <button id="fruitForgeAutoStopBtn" class="lab-secondary-btn fruit-forge-auto-stop-btn" disabled>■ STOP</button>
+                            </div>
+                            <div class="fruit-forge-auto-progress"><i id="fruitForgeAutoProgressFill"></i></div>
+                            <div id="fruitForgeAutoStatus" class="fruit-forge-auto-status"></div>
+                        </section>
+
+                        <button id="fruitForgeResetBtn" class="lab-secondary-btn fruit-forge-reset-btn">↺ RESET SALDA</button>
+                        <div class="fruit-forge-mechanics-note">
+                            <strong>Jak rozstrzygany jest los?</strong>
+                            <span>Web Crypto wybiera jedną pozycję z 10 000 000. Dokładnie 2 500 000 pozycji odpowiada 97 stopniom wygranej; pozostałe 7 500 000 przegrywa.</span>
+                        </div>
+                    </aside>
+                </div>
+            </section>
+
+            <section class="fruit-forge-lower-grid">
+                <article class="fruit-forge-card">
+                    <div class="fruit-forge-card-head"><span>🧾 OSTATNIE GRY</span><small>maks. 12</small></div>
+                    <div id="fruitForgeHistory" class="fruit-forge-history"></div>
+                </article>
+
+                <article class="fruit-forge-card fruit-forge-rules-card">
+                    <div class="fruit-forge-card-head"><span>📜 ZASADY SYMULATORA</span><small>zgodne z rdzeniem Juicy Wins</small></div>
+                    <p><strong>Plansza:</strong> 5 × 5 symboli. Wygrana jest wizualizowana jako klaster co najmniej 3 identycznych symboli stykających się poziomo lub pionowo.</p>
+                    <p><strong>Stopnie i szanse:</strong> wszystkie 97 stopni, liczby wygranych i stawki 1 / 2 / 5 / 10 / 20 / 30 / 50 zł odwzorowują pierwszą transzę oficjalnej tabeli.</p>
+                    <p><strong>Bonus 2%:</strong> oryginalna gierka dolicza do 1. stopnia nagrodę specjalną zależną od 2% opłat od poprzedniego trafienia. Offline nie znamy całej sprzedaży, dlatego tutaj działa lokalna symulacja tej samej zasady — 2% Twoich wirtualnych stawek.</p>
+                    <p><strong>Ważne:</strong> plansza jest animacją wyniku; dokładny wewnętrzny sposób przypisywania układu symboli do każdego z 97 stopni nie jest opublikowany w regulaminie.</p>
+                </article>
+            </section>
+
+            <details class="fruit-forge-odds-card" open>
+                <summary>
+                    <div><span>📊 PEŁNA TABELA 97 STOPNI</span><strong>Dokładne szanse i kwoty dla wybranej stawki</strong></div>
+                    <small>kliknij, aby zwinąć</small>
+                </summary>
+                <div id="fruitForgeReference" class="fruit-forge-reference"></div>
+            </details>
+        </div>
+    `;
+
+    bindFruitForgeEvents();
+    refreshFruitForgeUi();
+}
+
 
 /* =========================================================
    LOTTOFORGE MOBILE v9 — NAWIGACJA TELEFON

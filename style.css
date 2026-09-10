@@ -5525,3 +5525,614 @@ button,.primary-btn{border:0;border-radius:11px!important;padding:11px 16px!impo
         font-size:10px!important;
     }
 }
+
+
+/* =========================================================
+   LOTTOFORGE — GIERKI / FRUIT JACKPOT
+   Desktop + mobile. Własny wygląd, mechanika klastrowa 5x5.
+   ========================================================= */
+#contentArea.gierki-view{
+    display:block!important;
+    width:100%;
+    min-width:0;
+}
+.lottoforge-games-root{
+    width:100%;
+    max-width:1380px;
+    margin:0 auto;
+    padding-bottom:60px;
+}
+.fruit-forge-hero{
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-start;
+    gap:22px;
+    margin-bottom:16px;
+    padding:22px;
+    border-radius:20px;
+    border:1px solid rgba(255,103,151,.25);
+    background:
+        radial-gradient(circle at 84% 0%,rgba(255,88,129,.16),transparent 34%),
+        radial-gradient(circle at 8% 100%,rgba(255,190,73,.09),transparent 30%),
+        linear-gradient(145deg,rgba(23,26,42,.98),rgba(10,15,24,.99));
+    box-shadow:0 18px 48px rgba(0,0,0,.24);
+}
+.fruit-forge-hero h1{margin:5px 0 8px!important;}
+.fruit-forge-hero p{margin:0!important;max-width:780px;color:#95a2b7!important;font-size:13px!important;line-height:1.55;}
+.fruit-forge-kicker{font-size:10px;font-weight:900;letter-spacing:.11em;color:#ff8eaf;}
+.fruit-forge-source-badge{
+    min-width:235px;
+    padding:12px 14px;
+    border-radius:14px;
+    background:rgba(255,255,255,.025);
+    border:1px solid rgba(255,255,255,.08);
+    display:flex;
+    flex-direction:column;
+    gap:4px;
+}
+.fruit-forge-source-badge strong{font-size:10px;color:#ffb2c8;letter-spacing:.08em;}
+.fruit-forge-source-badge span{font-size:15px;color:#f4f7ff;font-weight:850;}
+.fruit-forge-source-badge small{font-size:10px;color:#7f8da3;}
+
+.fruit-forge-dashboard{
+    display:grid;
+    grid-template-columns:repeat(5,minmax(0,1fr));
+    gap:10px;
+    margin-bottom:14px;
+}
+.fruit-forge-stat{
+    min-width:0;
+    padding:13px 14px;
+    border-radius:14px;
+    background:linear-gradient(180deg,rgba(18,25,38,.96),rgba(11,16,25,.98));
+    border:1px solid rgba(101,119,151,.17);
+    display:flex;
+    flex-direction:column;
+    gap:4px;
+}
+.fruit-forge-stat.primary{
+    border-color:rgba(255,103,151,.30);
+    background:linear-gradient(180deg,rgba(54,22,40,.52),rgba(17,16,27,.98));
+}
+.fruit-forge-stat span{font-size:9px;font-weight:900;letter-spacing:.08em;color:#7e8ca3;text-transform:uppercase;}
+.fruit-forge-stat strong{font-size:18px;color:#f2f6ff;overflow-wrap:anywhere;}
+.fruit-forge-stat.primary strong{color:#ffb4ca;}
+.fruit-forge-stat small{font-size:9px;color:#69768a;}
+
+.fruit-forge-machine{
+    border-radius:22px;
+    padding:16px;
+    border:1px solid rgba(255,113,151,.20);
+    background:
+        radial-gradient(circle at 50% 0%,rgba(255,84,130,.08),transparent 36%),
+        linear-gradient(180deg,rgba(16,22,34,.98),rgba(8,12,20,.99));
+    box-shadow:0 20px 54px rgba(0,0,0,.24);
+}
+.fruit-forge-jackpot-meter{
+    margin:0 auto 14px;
+    width:min(100%,900px);
+    padding:15px 16px;
+    border-radius:18px;
+    border:1px solid rgba(247,198,92,.38);
+    background:
+        radial-gradient(circle at 50% -20%,rgba(255,220,104,.22),transparent 54%),
+        linear-gradient(135deg,rgba(87,55,13,.34),rgba(34,19,38,.90));
+    box-shadow:inset 0 0 28px rgba(255,202,74,.055),0 10px 28px rgba(0,0,0,.20);
+}
+.fruit-forge-progressive-main{
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:4px;
+    text-align:center;
+    padding:2px 8px 12px;
+}
+.fruit-forge-progressive-main span{
+    font-size:10px;
+    font-weight:950;
+    letter-spacing:.13em;
+    color:#f3cd70;
+}
+.fruit-forge-progressive-main strong{
+    font-size:clamp(29px,4vw,46px);
+    line-height:1.05;
+    color:#ffe7a5;
+    text-shadow:0 0 20px rgba(255,205,91,.23);
+}
+.fruit-forge-progressive-main small{
+    font-size:10px;
+    color:#a3916d;
+    line-height:1.4;
+}
+.fruit-forge-progressive-breakdown{
+    display:grid;
+    grid-template-columns:repeat(4,minmax(0,1fr));
+    gap:8px;
+    padding-top:10px;
+    border-top:1px solid rgba(247,198,92,.14);
+}
+.fruit-forge-progressive-breakdown>div{
+    min-width:0;
+    padding:9px 10px;
+    border-radius:11px;
+    background:rgba(8,12,20,.34);
+    border:1px solid rgba(247,198,92,.10);
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:4px;
+    text-align:center;
+}
+.fruit-forge-progressive-breakdown span{
+    font-size:8px;
+    font-weight:850;
+    letter-spacing:.06em;
+    text-transform:uppercase;
+    color:#8f8166;
+}
+.fruit-forge-progressive-breakdown b{
+    font-size:12px;
+    color:#f8d982;
+    overflow-wrap:anywhere;
+}
+.fruit-forge-progressive-note{
+    margin-top:10px;
+    padding:8px 10px;
+    border-radius:10px;
+    background:rgba(255,203,81,.045);
+    color:#83765f;
+    font-size:9px;
+    line-height:1.45;
+    text-align:center;
+}
+
+.fruit-forge-machine-body{
+    display:grid;
+    grid-template-columns:minmax(0,1fr) minmax(230px,300px);
+    gap:14px;
+    align-items:start;
+}
+.fruit-forge-stage{
+    min-width:0;
+    padding:18px;
+    border-radius:18px;
+    background:
+        radial-gradient(circle at 50% 0%,rgba(255,97,145,.07),transparent 36%),
+        linear-gradient(180deg,rgba(18,24,37,.98),rgba(9,14,22,.99));
+    border:1px solid rgba(255,103,151,.18);
+}
+.fruit-forge-stage-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:14px;}
+.fruit-forge-stage-head>div{display:flex;flex-direction:column;gap:4px;}
+.fruit-forge-stage-head span{font-size:9px;font-weight:900;letter-spacing:.10em;color:#ff8eaf;}
+.fruit-forge-stage-head strong{font-size:14px;color:#edf3ff;}
+.fruit-forge-stage-head small{font-size:10px;color:#738198;white-space:nowrap;}
+
+.fruit-forge-board{
+    width:min(100%,520px);
+    margin:0 auto;
+    display:grid;
+    grid-template-columns:repeat(5,minmax(0,1fr));
+    gap:8px;
+    perspective:700px;
+}
+.fruit-forge-cell{
+    min-width:0;
+    aspect-ratio:1;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    border-radius:17px;
+    background:
+        radial-gradient(circle at 35% 24%,rgba(255,255,255,.06),transparent 30%),
+        linear-gradient(145deg,#192231,#0b111a);
+    border:1px solid rgba(105,124,155,.20);
+    box-shadow:inset 0 -9px 17px rgba(0,0,0,.20),0 7px 16px rgba(0,0,0,.16);
+    animation:fruitForgeDrop .34s cubic-bezier(.18,.85,.32,1.14) both;
+    animation-delay:var(--cell-delay);
+    overflow:hidden;
+    position:relative;
+}
+.fruit-forge-cell::after{
+    content:"";
+    position:absolute;
+    inset:4px;
+    border-radius:13px;
+    border:1px solid rgba(255,255,255,.025);
+    pointer-events:none;
+}
+.fruit-forge-cell span{
+    font-size:clamp(32px,5vw,54px);
+    filter:drop-shadow(0 5px 7px rgba(0,0,0,.34));
+    transform:translateZ(0);
+}
+.fruit-forge-cell.hit{
+    border-color:rgba(255,203,81,.78);
+    background:radial-gradient(circle at 50% 40%,rgba(255,209,83,.28),rgba(103,40,65,.46));
+    box-shadow:0 0 0 2px rgba(255,196,64,.12),0 0 26px rgba(255,109,136,.26),inset 0 0 19px rgba(255,215,93,.15);
+    animation:fruitForgeHit .65s ease both;
+    animation-delay:calc(var(--cell-delay) + 90ms);
+}
+@keyframes fruitForgeDrop{
+    0%{transform:translateY(-72px) rotateX(-18deg) scale(.86);opacity:0;}
+    72%{transform:translateY(5px) rotateX(3deg) scale(1.02);opacity:1;}
+    100%{transform:translateY(0) rotateX(0) scale(1);opacity:1;}
+}
+@keyframes fruitForgeHit{
+    0%{transform:scale(.90);filter:brightness(1);}
+    45%{transform:scale(1.13);filter:brightness(1.34);}
+    72%{transform:scale(.97);}
+    100%{transform:scale(1);filter:brightness(1.08);}
+}
+
+.fruit-forge-result{
+    width:min(100%,520px);
+    margin:14px auto 0;
+    padding:13px 15px;
+    border-radius:13px;
+    display:flex;
+    flex-wrap:wrap;
+    align-items:center;
+    justify-content:space-between;
+    gap:8px 14px;
+    border:1px solid rgba(101,119,151,.17);
+    background:#0c121c;
+}
+.fruit-forge-result.empty strong{color:#dfe7f4;}
+.fruit-forge-result.empty span,.fruit-forge-result.loss span{color:#78869b;font-size:11px;}
+.fruit-forge-result.loss strong{color:#a7b2c3;}
+.fruit-forge-result.win{border-color:rgba(69,218,143,.36);background:rgba(22,88,59,.16);}
+.fruit-forge-result.win>span{font-size:9px;font-weight:900;letter-spacing:.09em;color:#7ce6aa;}
+.fruit-forge-result.win>strong{font-size:22px;color:#90f0b5;}
+.fruit-forge-result.win small{width:100%;font-size:10px;color:#789486;line-height:1.45;}
+.fruit-forge-result.win.big{border-color:rgba(255,198,83,.45);background:rgba(104,68,16,.14);}
+.fruit-forge-result.win.big>span,.fruit-forge-result.win.big>strong{color:#ffd77b;}
+.fruit-forge-result.win.jackpot{
+    border-color:rgba(255,226,123,.72);
+    background:radial-gradient(circle at 50% 0%,rgba(255,219,93,.20),rgba(76,39,28,.28));
+    box-shadow:0 0 32px rgba(255,192,64,.14);
+}
+
+.fruit-forge-controls{
+    padding:16px;
+    border-radius:16px;
+    background:linear-gradient(180deg,rgba(20,27,41,.98),rgba(10,15,24,.99));
+    border:1px solid rgba(91,108,136,.18);
+    position:sticky;
+    top:18px;
+}
+.fruit-forge-control-title{display:flex;flex-direction:column;gap:3px;margin-bottom:14px;}
+.fruit-forge-control-title span{font-size:9px;font-weight:900;letter-spacing:.09em;color:#ff8eaf;}
+.fruit-forge-control-title strong{font-size:13px;color:#e5edf9;line-height:1.35;}
+.fruit-forge-controls label{font-size:11px;font-weight:850;color:#9aa9bf;text-transform:uppercase;letter-spacing:.06em;}
+.fruit-forge-controls select{margin:7px 0 2px!important;}
+.fruit-forge-controls button{width:100%;margin-top:10px!important;}
+.fruit-forge-controls button:disabled{opacity:.62;cursor:wait;transform:none!important;}
+.fruit-forge-play-btn{min-height:50px;background:linear-gradient(135deg,#df3f74,#ff6b8f,#f5a33b)!important;box-shadow:0 12px 28px rgba(223,63,116,.25)!important;font-size:15px!important;}
+.fruit-forge-reset-btn{background:#1a2331!important;color:#b8c5d8!important;border:1px solid #2e3b50!important;}
+.fruit-forge-mechanics-note{margin-top:13px;padding:11px;border-radius:11px;background:#0c121b;border:1px solid rgba(91,108,136,.14);display:flex;flex-direction:column;gap:5px;}
+.fruit-forge-mechanics-note strong{font-size:10px;color:#cfd9e8;}
+.fruit-forge-mechanics-note span{font-size:9px;color:#76859b;line-height:1.5;}
+
+.fruit-forge-lower-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px;margin-top:14px;}
+.fruit-forge-card{padding:16px;border-radius:16px;background:linear-gradient(180deg,rgba(17,23,36,.96),rgba(10,15,24,.98));border:1px solid rgba(91,108,136,.16);}
+.fruit-forge-card-head{display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:10px;}
+.fruit-forge-card-head span{font-size:10px;font-weight:900;color:#dfe7f5;letter-spacing:.07em;}
+.fruit-forge-card-head small{font-size:9px;color:#738198;}
+.fruit-forge-rules-card p{margin:8px 0!important;font-size:11px!important;line-height:1.55;color:#8594aa!important;}
+.fruit-forge-rules-card strong{color:#dce6f5;}
+.fruit-forge-history{display:grid;gap:6px;}
+.fruit-forge-history-row{display:grid;grid-template-columns:54px minmax(0,1fr) auto;gap:8px;align-items:center;padding:8px 9px;border-radius:9px;background:#0c121b;border:1px solid rgba(92,108,137,.12);}
+.fruit-forge-history-row span{font-size:9px;color:#68768b;}
+.fruit-forge-history-row strong{font-size:11px;color:#cbd5e5;}
+.fruit-forge-history-row b{font-size:11px;color:#8795aa;white-space:nowrap;}
+.fruit-forge-history-row.win{border-color:rgba(64,216,138,.19);}
+.fruit-forge-history-row.win b{color:#7ce6aa;}
+.fruit-forge-history-row.jackpot{border-color:rgba(255,210,88,.36);background:rgba(81,55,16,.12);}
+.fruit-forge-history-row.jackpot b{color:#ffd675;}
+.fruit-forge-history-empty{padding:12px;border-radius:10px;background:#0c121b;color:#738198;font-size:11px;}
+
+.fruit-forge-odds-card{margin-top:14px;padding:0;border-radius:16px;background:linear-gradient(180deg,rgba(17,23,36,.96),rgba(10,15,24,.98));border:1px solid rgba(91,108,136,.16);overflow:hidden;}
+.fruit-forge-odds-card>summary{list-style:none;cursor:pointer;padding:14px 16px;display:flex;justify-content:space-between;align-items:center;gap:12px;}
+.fruit-forge-odds-card>summary::-webkit-details-marker{display:none;}
+.fruit-forge-odds-card>summary>div{display:flex;flex-direction:column;gap:4px;}
+.fruit-forge-odds-card>summary span{font-size:10px;font-weight:900;letter-spacing:.08em;color:#ff9ab8;}
+.fruit-forge-odds-card>summary strong{font-size:13px;color:#e7edf8;}
+.fruit-forge-odds-card>summary small{font-size:9px;color:#6f7d91;}
+.fruit-forge-reference{padding:0 16px 16px;border-top:1px solid rgba(91,108,136,.12);}
+.fruit-forge-reference-cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:14px 0;}
+.fruit-forge-reference-cards>div{padding:10px;border-radius:11px;background:#0c121b;border:1px solid rgba(92,108,137,.13);display:flex;flex-direction:column;gap:4px;}
+.fruit-forge-reference-cards span{font-size:9px;color:#77869b;text-transform:uppercase;letter-spacing:.05em;}
+.fruit-forge-reference-cards strong{font-size:15px;color:#edf3ff;}
+.fruit-forge-reference-cards small{font-size:9px;color:#68768a;line-height:1.35;}
+.fruit-forge-table-wrap{width:100%;overflow-x:auto;border-radius:12px;border:1px solid rgba(92,108,137,.14);}
+.fruit-forge-odds-table{width:100%;min-width:720px;border-collapse:collapse;background:#0b111a;}
+.fruit-forge-odds-table th{padding:9px 10px;background:#121a27;color:#7f8ea4;font-size:9px;text-transform:uppercase;letter-spacing:.06em;text-align:right;}
+.fruit-forge-odds-table th:first-child,.fruit-forge-odds-table td:first-child{text-align:center;}
+.fruit-forge-odds-table td{padding:8px 10px;border-top:1px solid rgba(92,108,137,.09);color:#b8c3d4;font-size:10px;text-align:right;white-space:nowrap;}
+.fruit-forge-odds-table tr.top-tier td{background:rgba(255,105,147,.035);color:#e7cfda;}
+.fruit-forge-odds-table tr:hover td{background:rgba(124,92,255,.045);}
+
+@media(max-width:1100px){
+    .fruit-forge-dashboard{grid-template-columns:repeat(3,minmax(0,1fr));}
+    .fruit-forge-reference-cards{grid-template-columns:repeat(2,minmax(0,1fr));}
+}
+@media(max-width:899px){
+    #contentArea.gierki-view{padding:0!important;}
+    .lottoforge-games-root{padding-bottom:36px;}
+    .fruit-forge-hero{flex-direction:column;padding:16px;border-radius:16px;}
+    .fruit-forge-source-badge{width:100%;min-width:0;}
+    .fruit-forge-dashboard{grid-template-columns:repeat(2,minmax(0,1fr));}
+    .fruit-forge-stat.primary{grid-column:1/-1;}
+    .fruit-forge-machine{padding:11px;border-radius:16px;}
+    .fruit-forge-machine-body{grid-template-columns:1fr;}
+    .fruit-forge-stage{padding:12px;border-radius:15px;order:1;}
+    .fruit-forge-controls{position:static;order:2;display:grid;grid-template-columns:1fr;gap:7px;padding:13px;}
+    .fruit-forge-controls button{min-height:48px;}
+    .fruit-forge-board{gap:6px;width:min(100%,500px);}
+    .fruit-forge-cell{border-radius:12px;}
+    .fruit-forge-cell span{font-size:clamp(30px,12vw,48px);}
+    .fruit-forge-lower-grid{grid-template-columns:1fr;}
+    .fruit-forge-reference-cards{grid-template-columns:1fr;}
+    .fruit-forge-odds-card>summary{align-items:flex-start;}
+}
+@media(max-width:480px){
+    .fruit-forge-dashboard{gap:7px;}
+    .fruit-forge-stat{padding:10px;}
+    .fruit-forge-stat strong{font-size:16px;}
+    .fruit-forge-jackpot-meter{padding:12px 10px;}
+    .fruit-forge-progressive-breakdown{grid-template-columns:repeat(2,minmax(0,1fr));}
+    .fruit-forge-progressive-main strong{font-size:clamp(28px,10vw,40px);}
+    .fruit-forge-stage-head{flex-direction:column;}
+    .fruit-forge-board{gap:4px;}
+    .fruit-forge-cell{border-radius:10px;}
+    .fruit-forge-cell::after{inset:3px;border-radius:8px;}
+    .fruit-forge-cell span{font-size:clamp(26px,11vw,42px);}
+    .fruit-forge-result{align-items:flex-start;flex-direction:column;}
+    .fruit-forge-history-row{grid-template-columns:46px minmax(0,1fr) auto;}
+    .fruit-forge-odds-card>summary small{display:none;}
+}
+
+
+/* =========================================================
+   LOTTOFORGE — FRUIT JACKPOT / AUTO MODE
+   Desktop + mobile
+   ========================================================= */
+.fruit-forge-auto-panel{
+    margin-top:12px;
+    padding:12px;
+    border-radius:13px;
+    background:linear-gradient(145deg,rgba(46,34,79,.42),rgba(11,17,27,.96));
+    border:1px solid rgba(139,92,246,.30);
+    box-shadow:inset 0 0 0 1px rgba(124,92,255,.035);
+}
+.fruit-forge-auto-head{
+    display:flex;
+    flex-direction:column;
+    gap:3px;
+    margin-bottom:10px;
+}
+.fruit-forge-auto-head span{
+    font-size:9px;
+    font-weight:950;
+    letter-spacing:.10em;
+    color:#b8a7ff;
+}
+.fruit-forge-auto-head strong{
+    color:#eef2ff;
+    font-size:12px;
+    line-height:1.35;
+}
+.fruit-forge-auto-grid{
+    display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:8px;
+}
+.fruit-forge-auto-grid label{
+    min-width:0;
+    margin:0!important;
+    font-size:9px!important;
+}
+.fruit-forge-auto-grid select{
+    margin:5px 0 0!important;
+    min-width:0;
+    font-size:11px!important;
+}
+
+.fruit-forge-auto-bigwin{
+    display:grid;
+    grid-template-columns:minmax(0,1.15fr) minmax(0,.85fr);
+    gap:8px;
+    margin-top:9px;
+    padding:9px;
+    border-radius:10px;
+    background:rgba(255,107,121,.055);
+    border:1px solid rgba(255,107,121,.18);
+}
+.fruit-forge-auto-bigwin > label{
+    min-width:0;
+    margin:0!important;
+    font-size:9px!important;
+}
+.fruit-forge-auto-bigwin-toggle{
+    display:flex!important;
+    align-items:center;
+    gap:8px;
+    min-height:42px;
+    padding:8px 9px;
+    border-radius:9px;
+    background:rgba(255,107,121,.045);
+    cursor:pointer;
+}
+.fruit-forge-auto-bigwin-toggle input{
+    flex:0 0 auto;
+    margin:0!important;
+}
+.fruit-forge-auto-bigwin-toggle span{
+    color:#ffc0c6;
+    font-size:10px;
+    font-weight:850;
+    line-height:1.35;
+}
+.fruit-forge-auto-bigwin select{
+    margin:5px 0 0!important;
+    font-size:11px!important;
+}
+.fruit-forge-auto-bigwin small{
+    display:block;
+    margin-top:5px;
+    color:#8795aa;
+    font-size:8px;
+    line-height:1.35;
+}
+
+.fruit-forge-auto-actions{
+    display:grid;
+    grid-template-columns:minmax(0,1fr) minmax(88px,.48fr);
+    gap:8px;
+    margin-top:9px;
+}
+.fruit-forge-auto-actions button{
+    margin:0!important;
+    min-height:43px;
+}
+.fruit-forge-auto-start-btn{
+    background:linear-gradient(135deg,#6750e8,#8d63ff,#3e8cff)!important;
+    box-shadow:0 9px 22px rgba(108,82,238,.24)!important;
+}
+.fruit-forge-auto-stop-btn{
+    background:#1a2230!important;
+    border:1px solid #33425a!important;
+    color:#c6d0df!important;
+}
+.fruit-forge-auto-stop-btn:disabled{
+    cursor:not-allowed!important;
+    opacity:.42!important;
+}
+.fruit-forge-auto-progress{
+    height:7px;
+    margin-top:10px;
+    overflow:hidden;
+    border-radius:999px;
+    background:#0a0f18;
+    border:1px solid rgba(91,108,136,.14);
+}
+.fruit-forge-auto-progress i{
+    display:block;
+    width:0;
+    height:100%;
+    border-radius:inherit;
+    background:linear-gradient(90deg,#7c5cff,#3ea6ff,#40d88a);
+    transition:width .12s linear;
+}
+.fruit-forge-auto-status{
+    display:flex;
+    flex-direction:column;
+    gap:3px;
+    margin-top:8px;
+    padding:8px 9px;
+    border-radius:9px;
+    background:rgba(7,12,19,.58);
+    border:1px solid rgba(91,108,136,.11);
+}
+.fruit-forge-auto-status strong{
+    color:#dfe7f6;
+    font-size:10px;
+}
+.fruit-forge-auto-status span{
+    color:#76869d;
+    font-size:9px;
+    line-height:1.45;
+}
+
+@media(max-width:899px){
+    .fruit-forge-auto-panel{padding:12px;margin-top:8px;}
+    .fruit-forge-auto-grid{grid-template-columns:repeat(2,minmax(0,1fr));}
+    .fruit-forge-auto-bigwin{grid-template-columns:1fr 1fr;}
+    .fruit-forge-auto-bigwin-toggle{min-height:48px;}
+    .fruit-forge-auto-actions{grid-template-columns:1fr 1fr;}
+    .fruit-forge-auto-actions button{min-height:48px;font-size:13px!important;}
+}
+
+@media(max-width:480px){
+    .fruit-forge-auto-grid{grid-template-columns:1fr;}
+    .fruit-forge-auto-bigwin{grid-template-columns:1fr;}
+    .fruit-forge-auto-bigwin-toggle span{font-size:11px;}
+    .fruit-forge-auto-bigwin small{font-size:9px;}
+    .fruit-forge-auto-actions{grid-template-columns:1fr;}
+    .fruit-forge-auto-status{padding:9px;}
+}
+
+/* =========================================================
+   FRUIT JACKPOT — REALTIME BILANS + BIG WIN SOUND
+   Desktop + mobile
+   ========================================================= */
+.fruit-forge-dashboard{
+    grid-template-columns:repeat(4,minmax(0,1fr));
+}
+.fruit-forge-stat.net strong.positive,
+.fruit-forge-auto-live strong.positive{
+    color:#7ce6aa;
+}
+.fruit-forge-stat.net strong.negative,
+.fruit-forge-auto-live strong.negative{
+    color:#ff8e98;
+}
+
+.fruit-forge-auto-live{
+    display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:7px;
+    margin-top:9px;
+}
+.fruit-forge-auto-live>div{
+    min-width:0;
+    padding:8px 9px;
+    border-radius:9px;
+    background:rgba(8,13,21,.72);
+    border:1px solid rgba(95,113,143,.13);
+    display:flex;
+    flex-direction:column;
+    gap:4px;
+}
+.fruit-forge-auto-live span{
+    color:#728198;
+    font-size:8px;
+    font-weight:900;
+    text-transform:uppercase;
+    letter-spacing:.055em;
+}
+.fruit-forge-auto-live strong{
+    color:#eef3ff;
+    font-size:12px;
+    line-height:1.3;
+    overflow-wrap:anywhere;
+}
+.fruit-forge-sound-toggle{
+    grid-column:1/-1;
+    border-color:rgba(247,198,92,.20)!important;
+    background:rgba(247,198,92,.045)!important;
+}
+.fruit-forge-sound-toggle span{
+    color:#f7d785!important;
+}
+
+@media(max-width:1100px){
+    .fruit-forge-dashboard{grid-template-columns:repeat(3,minmax(0,1fr));}
+}
+@media(max-width:899px){
+    .fruit-forge-dashboard{grid-template-columns:repeat(2,minmax(0,1fr));}
+    .fruit-forge-stat.primary{grid-column:1/-1;}
+    .fruit-forge-auto-live{grid-template-columns:repeat(2,minmax(0,1fr));}
+}
+@media(max-width:480px){
+    .fruit-forge-auto-live{grid-template-columns:1fr 1fr;gap:6px;}
+    .fruit-forge-auto-live>div{padding:8px;}
+    .fruit-forge-auto-live strong{font-size:11px;}
+}
+
+@media(max-width:420px){
+    .fruit-forge-progressive-breakdown{grid-template-columns:1fr 1fr;gap:6px;}
+    .fruit-forge-progressive-breakdown>div{padding:8px 6px;}
+    .fruit-forge-progressive-breakdown b{font-size:11px;}
+    .fruit-forge-progressive-note{font-size:8px;}
+}
