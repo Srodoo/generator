@@ -9601,3 +9601,51 @@ function showRngArena(gameKey = null, forcedPickCount = null, forcedSecondaryPic
     bindRngArenaEvents();
     renderRngArenaLive();
 }
+
+/* =========================================================
+   LOTTOFORGE MOBILE v9 — NAWIGACJA TELEFON
+   Desktop pozostaje bez zmian; aktywne tylko do 899 px.
+   ========================================================= */
+(function initLottoForgeMobileNavigation(){
+    const MOBILE_BREAKPOINT = 899;
+    const body = document.body;
+    const menuButton = document.getElementById("mobileMenuBtn");
+    const closeButton = document.getElementById("mobileMenuCloseBtn");
+    const backdrop = document.getElementById("mobileNavBackdrop");
+    const sidebar = document.getElementById("appSidebar");
+
+    if (!body || !menuButton || !closeButton || !backdrop || !sidebar) return;
+
+    const isMobile = () => window.innerWidth <= MOBILE_BREAKPOINT;
+
+    const setOpen = (open) => {
+        const shouldOpen = Boolean(open && isMobile());
+        body.classList.toggle("mobile-menu-open", shouldOpen);
+        menuButton.setAttribute("aria-expanded", shouldOpen ? "true" : "false");
+        backdrop.setAttribute("aria-hidden", shouldOpen ? "false" : "true");
+    };
+
+    menuButton.addEventListener("click", () => {
+        setOpen(!body.classList.contains("mobile-menu-open"));
+    });
+
+    closeButton.addEventListener("click", () => setOpen(false));
+    backdrop.addEventListener("click", () => setOpen(false));
+
+    sidebar.querySelectorAll("button").forEach(button => {
+        if (button === closeButton) return;
+        button.addEventListener("click", () => {
+            if (isMobile()) setOpen(false);
+        });
+    });
+
+    document.addEventListener("keydown", event => {
+        if (event.key === "Escape" && body.classList.contains("mobile-menu-open")) {
+            setOpen(false);
+        }
+    });
+
+    window.addEventListener("resize", () => {
+        if (!isMobile()) setOpen(false);
+    }, { passive: true });
+})();

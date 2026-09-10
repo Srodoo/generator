@@ -2,20 +2,39 @@
 <html lang="pl">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>LottoForge — Analysis & Generator</title>
 
     <link rel="stylesheet" href="style.css">
     <meta name="theme-color" content="#080b12">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="LottoForge">
 </head>
 
 <body>
 
+  <header class="mobile-topbar" aria-label="Nawigacja mobilna">
+      <button id="mobileMenuBtn" class="mobile-menu-btn" type="button" aria-label="Otwórz menu" aria-expanded="false" aria-controls="appSidebar">☰</button>
+      <div class="mobile-topbar-brand">
+          <strong>🎲 LottoForge</strong>
+          <small>Mobile</small>
+      </div>
+      <div class="mobile-topbar-spacer" aria-hidden="true"></div>
+  </header>
+  <div id="mobileNavBackdrop" class="mobile-nav-backdrop" aria-hidden="true"></div>
+
   <div class="app">
 
-    <aside class="sidebar">
+    <aside id="appSidebar" class="sidebar" aria-label="Menu LottoForge">
 
         <h2>🎲 LottoForge</h2>
+
+        <div class="mobile-sidebar-head">
+            <span>MENU</span>
+            <button id="mobileMenuCloseBtn" type="button" aria-label="Zamknij menu">✕</button>
+        </div>
 
        
 
