@@ -4968,3 +4968,74 @@ button,.primary-btn{border:0;border-radius:11px!important;padding:11px 16px!impo
         filter:none!important;
     }
 }
+
+
+/* =========================================================
+   LOTTOFORGE 10.09.2026 — KOPIOWANIE POJEDYNCZEGO KUPONU
+   Ręczny RNG / filtry ręczne: format 1,5,6,8,...
+   ========================================================= */
+.single-ticket-copy-panel{
+    width:100%;
+    margin:-17px 0 18px;
+    padding:13px 14px;
+    border-radius:14px;
+    background:linear-gradient(145deg,rgba(18,26,40,.98),rgba(10,16,25,.99));
+    border:1px solid rgba(64,216,138,.22);
+    box-shadow:0 10px 28px rgba(0,0,0,.18);
+}
+.single-ticket-copy-head{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    margin-bottom:9px;
+}
+.single-ticket-copy-head span{
+    color:#7ce6aa;
+    font-size:10px;
+    font-weight:900;
+    letter-spacing:.08em;
+}
+.single-ticket-copy-head small{
+    color:#8190a6;
+    font-size:10px;
+    font-weight:750;
+}
+.single-ticket-copy-row{
+    display:grid;
+    grid-template-columns:minmax(0,1fr) auto;
+    gap:9px;
+    align-items:center;
+}
+.single-ticket-copy-input{
+    margin:0!important;
+    min-width:0;
+    min-height:42px;
+    font:800 13px/1.3 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace!important;
+    letter-spacing:.025em;
+    color:#e7f6ee!important;
+    background:#080e16!important;
+    border-color:#2a4a3c!important;
+}
+.single-ticket-copy-btn{
+    margin:0!important;
+    min-height:42px;
+    white-space:nowrap;
+}
+@media(max-width:760px){
+    .single-ticket-copy-panel{
+        margin:-12px 0 16px;
+        padding:12px;
+    }
+    .single-ticket-copy-head{
+        align-items:flex-start;
+        flex-direction:column;
+        gap:3px;
+    }
+    .single-ticket-copy-row{
+        grid-template-columns:1fr;
+    }
+    .single-ticket-copy-btn{
+        width:100%;
+    }
+}

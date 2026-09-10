@@ -717,6 +717,8 @@ ${currentGame === games.euro ? `
 ${currentGame === games.extra ? `
 <div id="extraNumber" class="ball-container"></div>
 ` : ""}
+
+<div id="singleTicketCopyMount"></div>
 <div id="stats"></div>
 
 <div class="side-panel">
@@ -1372,7 +1374,9 @@ function renderTicketBatch(tickets, options = {}) {
     const stats = document.getElementById("stats");
     const euroDiv = document.getElementById("euroNumbers");
     const extraDiv = document.getElementById("extraNumber");
+    const singleCopyMount = document.getElementById("singleTicketCopyMount");
 
+    if (singleCopyMount) singleCopyMount.innerHTML = "";
     if (euroDiv) euroDiv.innerHTML = "";
     if (extraDiv) extraDiv.innerHTML = "";
     if (!numbersDiv || !stats) return;
@@ -4855,6 +4859,11 @@ function generateMiniLotto(attempt = 0, autoForgePlan = null) {
 
     const MAX_ATTEMPTS = 5000;
 
+    if (attempt === 0) {
+        const singleCopyMount = document.getElementById("singleTicketCopyMount");
+        if (singleCopyMount) singleCopyMount.innerHTML = "";
+    }
+
     if (autoForgePlan) {
         // Każda próba jest niezależna. Ślad decyzji pokazuje wyłącznie kupon,
         // który ostatecznie przeszedł wszystkie filtry.
@@ -5063,6 +5072,8 @@ function generateMiniLotto(attempt = 0, autoForgePlan = null) {
             `;
         });
     }
+
+    renderSingleGeneratedCopy(numbers, euroNumbers, extraNumber);
 
     const stats = document.getElementById("stats");
     const parzyste = numbers.filter(n => n % 2 === 0).length;
@@ -7703,6 +7714,69 @@ function formatTicketForLaboratory(ticket, gameKey) {
 
 function formatTicketsForLaboratory(tickets, gameKey) {
     return tickets.map(ticket => formatTicketForLaboratory(ticket, gameKey)).join("\n");
+}
+
+// =========================================================
+// LOTTOFORGE — KOPIOWANIE POJEDYNCZEGO KUPONU
+// Ręczny generator: liczby w formacie 1,5,6,8,...
+// =========================================================
+function formatSingleGeneratedTicketForCopy(numbers, euroNumbers = [], extraNumber = []) {
+    const main = [...(numbers || [])]
+        .sort((a, b) => a - b)
+        .join(",");
+
+    if (currentGame === games.euro && euroNumbers.length) {
+        const secondary = [...euroNumbers]
+            .sort((a, b) => a - b)
+            .join(",");
+        return `${main} | Euro:${secondary}`;
+    }
+
+    if (currentGame === games.extra && extraNumber.length) {
+        return `${main} | Extra:${extraNumber.join(",")}`;
+    }
+
+    return main;
+}
+
+function renderSingleGeneratedCopy(numbers, euroNumbers = [], extraNumber = []) {
+    const mount = document.getElementById("singleTicketCopyMount");
+    if (!mount || !Array.isArray(numbers) || !numbers.length) return;
+
+    const copyText = formatSingleGeneratedTicketForCopy(numbers, euroNumbers, extraNumber);
+
+    mount.innerHTML = `
+        <section class="single-ticket-copy-panel">
+            <div class="single-ticket-copy-head">
+                <span>📋 GOTOWE DO SKOPIOWANIA</span>
+                <small>format po przecinku</small>
+            </div>
+            <div class="single-ticket-copy-row">
+                <input
+                    id="singleTicketCopyText"
+                    class="single-ticket-copy-input"
+                    type="text"
+                    value="${copyText}"
+                    readonly
+                    aria-label="Wygenerowane liczby do skopiowania">
+                <button
+                    type="button"
+                    id="singleTicketCopyBtn"
+                    class="lab-secondary-btn single-ticket-copy-btn">
+                    📋 Kopiuj liczby
+                </button>
+            </div>
+        </section>
+    `;
+
+    const input = document.getElementById("singleTicketCopyText");
+    const button = document.getElementById("singleTicketCopyBtn");
+
+    button?.addEventListener("click", () => {
+        copyLaboratoryText(input?.value || copyText, button);
+    });
+
+    input?.addEventListener("click", () => input.select());
 }
 
 async function copyLaboratoryText(textValue, button = null) {
