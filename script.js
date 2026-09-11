@@ -1286,69 +1286,62 @@ function getClusterAssistThresholds() {
         : { cluster: 2, mega: 3, label: "2+", megaLabel: "3+" };
 }
 
-function buildClusterBoomAnalysis(windowSize = 20, targetCount = 8) {
-    const draws = getCurrentGameDraws().filter(draw => Array.isArray(draw.liczby) && draw.liczby.length);
-    if (!draws.length) {
-        return { ok: false, message: "Brak danych. Najpierw zaimportuj historię losowań dla tej gry." };
-    }
+const BOOM_CONSENSUS_WINDOWS = [2, 3, 4, 5, 10, 20];
 
-    const sample = draws.slice(-Math.min(Math.max(2, Number(windowSize) || 20), draws.length));
+function getBoomDesiredSectorCount(targetCount, sectorCount = currentGame.ranges.length) {
+    const base = targetCount >= 7 ? 3 : targetCount >= 4 ? 2 : 1;
+    return Math.min(base, Math.max(1, sectorCount), Math.max(1, targetCount));
+}
+
+function buildBoomWindowSnapshot(draws, windowSize) {
+    const cleanDraws = (draws || []).filter(draw => Array.isArray(draw.liczby) && draw.liczby.length);
+    if (!cleanDraws.length) return null;
+
+    const sample = cleanDraws.slice(-Math.min(Math.max(2, Number(windowSize) || 2), cleanDraws.length));
+    if (!sample.length) return null;
+
     const sectorCount = currentGame.ranges.length;
     const thresholds = getClusterAssistThresholds();
     const historicalDrawSize = getHistoricalDrawCount();
     const halfIndex = Math.max(1, Math.floor(sample.length / 2));
-    const sectorStats = Array.from({ length: sectorCount }, (_, index) => ({
+    const stats = Array.from({ length: sectorCount }, (_, index) => ({
         index,
         label: getSectorLabel(index),
         sum: 0,
         max: 0,
         clusterDraws: 0,
         megaDraws: 0,
-        exactMegaDraws: 0,
         olderSum: 0,
         newerSum: 0,
         olderClusterDraws: 0,
         newerClusterDraws: 0,
-        lastClusterAgo: null,
-        histogram: new Map(),
-        boomNumberHits: new Array(currentGame.max + 1).fill(0),
-        allNumberHits: new Array(currentGame.max + 1).fill(0)
+        lastClusterAgo: null
     }));
 
     sample.forEach((draw, drawIndex) => {
         const counts = new Array(sectorCount).fill(0);
-        const numbersBySector = Array.from({ length: sectorCount }, () => []);
-
         (draw.liczby || []).forEach(number => {
             if (!Number.isInteger(number) || number < 1 || number > currentGame.max) return;
-            const sector = getSectorIndex(number);
-            counts[sector]++;
-            numbersBySector[sector].push(number);
-            sectorStats[sector].allNumberHits[number]++;
+            counts[getSectorIndex(number)]++;
         });
 
         counts.forEach((count, sector) => {
-            const stat = sectorStats[sector];
+            const stat = stats[sector];
             stat.sum += count;
             stat.max = Math.max(stat.max, count);
-            stat.histogram.set(count, (stat.histogram.get(count) || 0) + 1);
-
             const isOlder = drawIndex < halfIndex;
             if (isOlder) stat.olderSum += count;
             else stat.newerSum += count;
-
             if (count >= thresholds.cluster) {
                 stat.clusterDraws++;
                 if (isOlder) stat.olderClusterDraws++;
                 else stat.newerClusterDraws++;
-                numbersBySector[sector].forEach(number => stat.boomNumberHits[number]++);
             }
             if (count >= thresholds.mega) stat.megaDraws++;
-            if (count === thresholds.mega) stat.exactMegaDraws++;
         });
     });
 
-    sectorStats.forEach(stat => {
+    stats.forEach(stat => {
         for (let offset = 0; offset < sample.length; offset++) {
             const draw = sample[sample.length - 1 - offset];
             const count = (draw.liczby || []).filter(number => getSectorIndex(number) === stat.index).length;
@@ -1385,7 +1378,7 @@ function buildClusterBoomAnalysis(windowSize = 20, targetCount = 8) {
         ));
     });
 
-    const rankedSectors = [...sectorStats].sort((a, b) =>
+    const ranking = [...stats].sort((a, b) =>
         b.score - a.score ||
         b.megaRate - a.megaRate ||
         b.clusterRate - a.clusterRate ||
@@ -1393,7 +1386,394 @@ function buildClusterBoomAnalysis(windowSize = 20, targetCount = 8) {
         a.index - b.index
     );
 
-    const desiredBombSectors = targetCount >= 7 ? 3 : targetCount >= 4 ? 2 : 1;
+    return {
+        windowSize: sample.length,
+        requestedWindow: Number(windowSize) || sample.length,
+        stats,
+        ranking
+    };
+}
+
+function buildBoomConsensusModel(draws, targetCount) {
+    const cleanDraws = (draws || []).filter(draw => Array.isArray(draw.liczby) && draw.liczby.length);
+    const windows = BOOM_CONSENSUS_WINDOWS.filter(size => size <= cleanDraws.length);
+    if (!windows.length && cleanDraws.length >= 2) windows.push(Math.min(2, cleanDraws.length));
+
+    const snapshots = windows
+        .map(size => buildBoomWindowSnapshot(cleanDraws, size))
+        .filter(Boolean);
+
+    const sectorCount = currentGame.ranges.length;
+    const desired = getBoomDesiredSectorCount(targetCount, sectorCount);
+
+    const rankingMaps = snapshots.map(snapshot => {
+        const map = new Map();
+        snapshot.ranking.forEach((sector, rank) => map.set(sector.index, rank));
+        return map;
+    });
+
+    const sectorRanking = Array.from({ length: sectorCount }, (_, index) => {
+        const windowSignals = snapshots.map((snapshot, snapshotIndex) => {
+            const stat = snapshot.stats[index];
+            const rank = rankingMaps[snapshotIndex].get(index) ?? sectorCount - 1;
+            return {
+                window: snapshot.windowSize,
+                score: stat.score,
+                rank: rank + 1,
+                clusterRate: stat.clusterRate,
+                megaRate: stat.megaRate
+            };
+        });
+
+        const averageScore = windowSignals.length
+            ? average(windowSignals.map(item => item.score))
+            : 0;
+        const agreement = windowSignals.length
+            ? windowSignals.filter(item => item.rank <= desired).length / windowSignals.length
+            : 0;
+        const topOneRate = windowSignals.length
+            ? windowSignals.filter(item => item.rank === 1).length / windowSignals.length
+            : 0;
+        const persistence = windowSignals.length
+            ? windowSignals.filter(item => item.score >= 55).length / windowSignals.length
+            : 0;
+        const spread = windowSignals.length > 1
+            ? standardDeviation(windowSignals.map(item => item.score))
+            : 0;
+        const stability = clamp(1 - spread / 35, 0, 1);
+
+        const score = Math.round(clamp(
+            averageScore * 0.60 +
+            agreement * 22 +
+            persistence * 8 +
+            topOneRate * 5 +
+            stability * 5,
+            0,
+            100
+        ));
+
+        return {
+            index,
+            label: getSectorLabel(index),
+            score,
+            averageScore,
+            agreement,
+            topOneRate,
+            persistence,
+            stability,
+            spread,
+            windowSignals
+        };
+    }).sort((a, b) =>
+        b.score - a.score ||
+        b.agreement - a.agreement ||
+        b.averageScore - a.averageScore ||
+        a.index - b.index
+    );
+
+    return {
+        windows: snapshots.map(snapshot => snapshot.windowSize),
+        snapshots,
+        desiredSectorCount: desired,
+        sectorRanking
+    };
+}
+
+function buildBoomWalkForwardValidation(draws, targetCount, maxTests = 120) {
+    const cleanDraws = (draws || []).filter(draw => Array.isArray(draw.liczby) && draw.liczby.length);
+    const sectorCount = currentGame.ranges.length;
+    const thresholds = getClusterAssistThresholds();
+    const desired = getBoomDesiredSectorCount(targetCount, sectorCount);
+
+    if (cleanDraws.length < 8) {
+        return {
+            available: false,
+            tests: 0,
+            message: "Potrzeba co najmniej 8 historycznych losowań, żeby uruchomić uczciwy test walk-forward."
+        };
+    }
+
+    const firstTestIndex = Math.max(5, cleanDraws.length - Math.max(20, Number(maxTests) || 120));
+    let tests = 0;
+    let topSectorWasActualTop = 0;
+    let enoughSelectedBooms = 0;
+    let selectedBoomEvents = 0;
+    let allBoomEvents = 0;
+    let selectedCoverageSum = 0;
+    let expectedCoverageSum = 0;
+
+    for (let index = firstTestIndex; index < cleanDraws.length; index++) {
+        const history = cleanDraws.slice(0, index);
+        if (history.length < 5) continue;
+
+        const consensus = buildBoomConsensusModel(history, targetCount);
+        if (!consensus.sectorRanking.length) continue;
+
+        const selected = consensus.sectorRanking.slice(0, desired);
+        const actualDraw = cleanDraws[index];
+        const counts = new Array(sectorCount).fill(0);
+        (actualDraw.liczby || []).forEach(number => {
+            if (Number.isInteger(number) && number >= 1 && number <= currentGame.max) {
+                counts[getSectorIndex(number)]++;
+            }
+        });
+
+        const actualMax = Math.max(...counts, 0);
+        const topSectorIndex = selected[0]?.index;
+        if (topSectorIndex !== undefined && counts[topSectorIndex] === actualMax) {
+            topSectorWasActualTop++;
+        }
+
+        let selectedBoomCount = 0;
+        let selectedHits = 0;
+        let expectedCapacity = 0;
+
+        selected.forEach(sector => {
+            const count = counts[sector.index] || 0;
+            if (count >= thresholds.cluster) {
+                selectedBoomCount++;
+                selectedBoomEvents++;
+            }
+            selectedHits += count;
+            expectedCapacity += getSectorBounds(sector.index).capacity;
+        });
+
+        counts.forEach(count => {
+            if (count >= thresholds.cluster) allBoomEvents++;
+        });
+
+        if (selectedBoomCount >= Math.min(2, selected.length)) enoughSelectedBooms++;
+
+        const drawSize = Math.max(1, (actualDraw.liczby || []).length);
+        selectedCoverageSum += selectedHits / drawSize;
+        expectedCoverageSum += expectedCapacity / Math.max(1, currentGame.max);
+        tests++;
+    }
+
+    if (!tests) {
+        return {
+            available: false,
+            tests: 0,
+            message: "Za mało poprawnych punktów testowych do walk-forward."
+        };
+    }
+
+    const selectedBoomRate = selectedBoomEvents / Math.max(1, tests * desired);
+    const baselineBoomRate = allBoomEvents / Math.max(1, tests * sectorCount);
+    const boomLift = selectedBoomRate - baselineBoomRate;
+    const averageCoverage = selectedCoverageSum / tests;
+    const expectedCoverage = expectedCoverageSum / tests;
+    const coverageLift = averageCoverage - expectedCoverage;
+    const topSectorTopRate = topSectorWasActualTop / tests;
+    const twoOfSelectedRate = enoughSelectedBooms / tests;
+    const topBaseline = 1 / Math.max(1, sectorCount);
+    const topLift = topSectorTopRate - topBaseline;
+    const sampleFactor = clamp(tests / 80, 0, 1);
+
+    const boomLiftNorm = clamp(0.5 + boomLift * 2.5, 0, 1);
+    const coverageLiftNorm = clamp(0.5 + coverageLift * 2.0, 0, 1);
+    const topLiftNorm = clamp(0.5 + topLift * 1.6, 0, 1);
+    const historyFit = Math.round(clamp(
+        (boomLiftNorm * 0.40 + coverageLiftNorm * 0.30 + topLiftNorm * 0.15 + sampleFactor * 0.15) * 100,
+        0,
+        100
+    ));
+
+    return {
+        available: true,
+        tests,
+        desiredSectorCount: desired,
+        topSectorTopRate,
+        twoOfSelectedRate,
+        selectedBoomRate,
+        baselineBoomRate,
+        boomLift,
+        averageCoverage,
+        expectedCoverage,
+        coverageLift,
+        historyFit
+    };
+}
+
+function buildClusterBoomAnalysis(windowSize = 20, targetCount = 8) {
+    const draws = getCurrentGameDraws().filter(draw => Array.isArray(draw.liczby) && draw.liczby.length);
+    if (!draws.length) {
+        return { ok: false, message: "Brak danych. Najpierw zaimportuj historię losowań dla tej gry." };
+    }
+
+    const sample = draws.slice(-Math.min(Math.max(2, Number(windowSize) || 20), draws.length));
+    const sectorCount = currentGame.ranges.length;
+    const thresholds = getClusterAssistThresholds();
+    const historicalDrawSize = getHistoricalDrawCount();
+    const halfIndex = Math.max(1, Math.floor(sample.length / 2));
+    const sectorStats = Array.from({ length: sectorCount }, (_, index) => ({
+        index,
+        label: getSectorLabel(index),
+        sum: 0,
+        max: 0,
+        clusterDraws: 0,
+        megaDraws: 0,
+        exactMegaDraws: 0,
+        olderSum: 0,
+        newerSum: 0,
+        olderClusterDraws: 0,
+        newerClusterDraws: 0,
+        lastClusterAgo: null,
+        histogram: new Map(),
+        boomNumberHits: new Array(currentGame.max + 1).fill(0),
+        recentBoomNumberHits: new Array(currentGame.max + 1).fill(0),
+        allNumberHits: new Array(currentGame.max + 1).fill(0),
+        participationByNumber: new Array(currentGame.max + 1).fill(null)
+    }));
+
+    sample.forEach((draw, drawIndex) => {
+        const counts = new Array(sectorCount).fill(0);
+        const numbersBySector = Array.from({ length: sectorCount }, () => []);
+
+        (draw.liczby || []).forEach(number => {
+            if (!Number.isInteger(number) || number < 1 || number > currentGame.max) return;
+            const sector = getSectorIndex(number);
+            counts[sector]++;
+            numbersBySector[sector].push(number);
+            sectorStats[sector].allNumberHits[number]++;
+        });
+
+        counts.forEach((count, sector) => {
+            const stat = sectorStats[sector];
+            stat.sum += count;
+            stat.max = Math.max(stat.max, count);
+            stat.histogram.set(count, (stat.histogram.get(count) || 0) + 1);
+
+            const isOlder = drawIndex < halfIndex;
+            if (isOlder) stat.olderSum += count;
+            else stat.newerSum += count;
+
+            if (count >= thresholds.cluster) {
+                stat.clusterDraws++;
+                if (isOlder) stat.olderClusterDraws++;
+                else stat.newerClusterDraws++;
+                numbersBySector[sector].forEach(number => {
+                    stat.boomNumberHits[number]++;
+                    if (!isOlder) stat.recentBoomNumberHits[number]++;
+                });
+            }
+            if (count >= thresholds.mega) stat.megaDraws++;
+            if (count === thresholds.mega) stat.exactMegaDraws++;
+        });
+    });
+
+    const consensus = buildBoomConsensusModel(draws, targetCount);
+    const consensusByIndex = new Map(consensus.sectorRanking.map(item => [item.index, item]));
+    const walkForward = buildBoomWalkForwardValidation(draws, targetCount);
+    const shortAnchor = sample.length <= 5;
+    const anchorWeight = shortAnchor ? 0.60 : 0.45;
+    const consensusWeight = 1 - anchorWeight;
+
+    sectorStats.forEach(stat => {
+        for (let offset = 0; offset < sample.length; offset++) {
+            const draw = sample[sample.length - 1 - offset];
+            const count = (draw.liczby || []).filter(number => getSectorIndex(number) === stat.index).length;
+            if (count >= thresholds.cluster) {
+                stat.lastClusterAgo = offset;
+                break;
+            }
+        }
+
+        const olderN = halfIndex;
+        const newerN = Math.max(1, sample.length - halfIndex);
+        stat.average = stat.sum / sample.length;
+        stat.clusterRate = stat.clusterDraws / sample.length;
+        stat.megaRate = stat.megaDraws / sample.length;
+        stat.olderAverage = stat.olderSum / olderN;
+        stat.newerAverage = stat.newerSum / newerN;
+        stat.olderClusterRate = stat.olderClusterDraws / olderN;
+        stat.newerClusterRate = stat.newerClusterDraws / newerN;
+        stat.momentum = stat.newerClusterRate - stat.olderClusterRate;
+        stat.recency = stat.lastClusterAgo === null
+            ? 0
+            : clamp(1 - stat.lastClusterAgo / Math.max(1, sample.length - 1), 0, 1);
+
+        const density = clamp(stat.average / Math.max(1, historicalDrawSize / sectorCount), 0, 2) / 2;
+        const momentumNorm = clamp(0.5 + stat.momentum * 1.5, 0, 1);
+        stat.anchorScore = Math.round(clamp(
+            stat.clusterRate * 42 +
+            stat.megaRate * 34 +
+            density * 10 +
+            momentumNorm * 8 +
+            stat.recency * 6,
+            0,
+            100
+        ));
+
+        const consensusStat = consensusByIndex.get(stat.index);
+        stat.consensusScore = consensusStat?.score ?? stat.anchorScore;
+        stat.consensusAgreement = consensusStat?.agreement ?? 0;
+        stat.consensusTopOneRate = consensusStat?.topOneRate ?? 0;
+        stat.consensusWindowSignals = consensusStat?.windowSignals || [];
+        stat.score = Math.round(clamp(
+            stat.anchorScore * anchorWeight + stat.consensusScore * consensusWeight,
+            0,
+            100
+        ));
+
+        const bounds = getSectorBounds(stat.index);
+        const recentBoomDenominator = Math.max(1, stat.newerClusterDraws);
+        const boomDenominator = Math.max(1, stat.clusterDraws);
+        stat.participationRanking = [];
+
+        for (let number = bounds.start; number <= bounds.end; number++) {
+            const boomHits = stat.boomNumberHits[number] || 0;
+            const recentBoomHits = stat.recentBoomNumberHits[number] || 0;
+            const allHits = stat.allNumberHits[number] || 0;
+            const boomRate = stat.clusterDraws ? boomHits / boomDenominator : 0;
+            const recentBoomRate = stat.newerClusterDraws ? recentBoomHits / recentBoomDenominator : 0;
+            const allRate = allHits / Math.max(1, sample.length);
+            const participationScore = clamp(
+                boomRate * 72 + recentBoomRate * 18 + allRate * 10,
+                0,
+                100
+            );
+            const item = {
+                number,
+                boomHits,
+                recentBoomHits,
+                allHits,
+                boomRate,
+                recentBoomRate,
+                allRate,
+                score: participationScore
+            };
+            stat.participationByNumber[number] = item;
+            stat.participationRanking.push(item);
+        }
+
+        stat.participationRanking.sort((a, b) =>
+            b.score - a.score || b.boomHits - a.boomHits || b.allHits - a.allHits || a.number - b.number
+        );
+    });
+
+    const rankedSectors = [...sectorStats].sort((a, b) =>
+        b.score - a.score ||
+        b.consensusScore - a.consensusScore ||
+        b.megaRate - a.megaRate ||
+        b.clusterRate - a.clusterRate ||
+        b.average - a.average ||
+        a.index - b.index
+    );
+
+    const baseDesiredBombSectors = getBoomDesiredSectorCount(targetCount, sectorCount);
+    const widenForWeakHistory = walkForward.available && walkForward.historyFit < 50 ? 1 : 0;
+    const desiredBombSectors = Math.min(
+        sectorCount,
+        Math.max(1, targetCount),
+        baseDesiredBombSectors + widenForWeakHistory
+    );
+    const concentrationMode = widenForWeakHistory
+        ? "SZERSZA — słabszy walk-forward"
+        : walkForward.available && walkForward.historyFit >= 70
+            ? "MOCNA — wysoka zgodność historyczna"
+            : "STANDARD — consensus + kotwica";
+
     const selectedSectors = rankedSectors.slice(0, Math.min(desiredBombSectors, rankedSectors.length));
     const structure = new Array(sectorCount).fill(0);
     const allocation = new Array(selectedSectors.length).fill(0);
@@ -1404,12 +1784,11 @@ function buildClusterBoomAnalysis(windowSize = 20, targetCount = 8) {
 
     let remaining = targetCount - allocation.reduce((a, b) => a + b, 0);
     if (remaining > 0 && selectedSectors.length) {
-        // Dzielimy resztę proporcjonalnie do realnej "masy" BOOM sektora.
-        // Dzięki temu przy historycznym układzie np. 5 / 4 / 5 i kuponie 8 liczb
-        // naturalnie dostajemy koncentrację bliską 3 / 2 / 3 zamiast 4 / 1 / 3.
         const strengths = selectedSectors.map(sector => Math.max(
             0.01,
-            sector.average * (1 + sector.clusterRate + sector.megaRate * 1.5)
+            sector.average *
+            (1 + sector.clusterRate + sector.megaRate * 1.5) *
+            (0.75 + sector.consensusScore / 100 * 0.50)
         ));
         const extraCapacities = selectedSectors.map((sector, index) =>
             Math.max(0, getSectorBounds(sector.index).capacity - allocation[index])
@@ -1421,7 +1800,6 @@ function buildClusterBoomAnalysis(windowSize = 20, targetCount = 8) {
         remaining = targetCount - allocation.reduce((a, b) => a + b, 0);
     }
 
-    // Awaryjne domknięcie tylko wtedy, gdy pojemność któregoś sektora ograniczyła podział.
     let guard = 0;
     while (remaining > 0 && selectedSectors.length && guard < 100) {
         const index = guard % selectedSectors.length;
@@ -1476,7 +1854,14 @@ function buildClusterBoomAnalysis(windowSize = 20, targetCount = 8) {
         structure,
         structureRanking,
         historicalDrawSize,
-        sample
+        sample,
+        consensus,
+        walkForward,
+        anchorWeight,
+        consensusWeight,
+        baseDesiredBombSectors,
+        desiredBombSectors,
+        concentrationMode
     };
 }
 
@@ -1497,17 +1882,81 @@ function renderClusterBoomReport(analysis) {
 
     const selectedIndexes = new Set(analysis.selectedSectors.map(item => item.index));
     const topStructures = analysis.structureRanking.slice(0, 5);
+    const consensusTop = (analysis.consensus?.sectorRanking || []).slice(0, Math.min(5, currentGame.ranges.length));
+    const consensusWindowsText = (analysis.consensus?.windows || []).join(" / ") || "—";
+    const walk = analysis.walkForward;
+    const pct = value => `${Math.round((Number(value) || 0) * 100)}%`;
+    const signedPct = value => {
+        const number = (Number(value) || 0) * 100;
+        const sign = number > 0 ? "+" : "";
+        return `${sign}${number.toFixed(1)} pp`;
+    };
+
+    const participationPanels = analysis.selectedSectors.map((sector, selectedIndex) => {
+        const topNumbers = (sector.participationRanking || []).slice(0, Math.min(6, getSectorBounds(sector.index).capacity));
+        return `
+            <article class="boom-participation-card">
+                <div class="boom-participation-head">
+                    <div>
+                        <span>SEKTOR #${selectedIndex + 1}</span>
+                        <strong>${sector.label}</strong>
+                    </div>
+                    <em>${analysis.allocation[selectedIndex] || 0} liczb do kuponu</em>
+                </div>
+                <div class="boom-participation-numbers">
+                    ${topNumbers.map(item => `
+                        <div class="boom-number-signal">
+                            <b>${String(item.number).padStart(2, "0")}</b>
+                            <span>${item.boomHits}/${Math.max(1, sector.clusterDraws)} BOOM</span>
+                            <small>${pct(item.boomRate)}</small>
+                        </div>
+                    `).join("")}
+                </div>
+            </article>
+        `;
+    }).join("");
+
+    const walkForwardHtml = walk?.available ? `
+        <div class="boom-walkforward-card">
+            <div class="boom-walkforward-head">
+                <div>
+                    <span>🧪 WALK-FORWARD • BEZ PODGLĄDANIA PRZYSZŁOŚCI</span>
+                    <h3>Historyczna kontrola działania sygnału</h3>
+                </div>
+                <div class="boom-history-fit ${walk.historyFit >= 70 ? "high" : walk.historyFit >= 55 ? "mid" : "low"}">
+                    <small>CONFIDENCE</small>
+                    <strong>${walk.historyFit}/100</strong>
+                </div>
+            </div>
+            <div class="boom-walkforward-grid">
+                <div><span>Testów historycznych</span><strong>${walk.tests}</strong></div>
+                <div><span>TOP sektor = TOP następnego losowania</span><strong>${pct(walk.topSectorTopRate)}</strong></div>
+                <div><span>Min. ${Math.min(2, walk.desiredSectorCount)} wskazane sektory zrobiły BOOM</span><strong>${pct(walk.twoOfSelectedRate)}</strong></div>
+                <div><span>BOOM rate wskazanych sektorów</span><strong>${pct(walk.selectedBoomRate)}</strong><small>tło całej planszy ${pct(walk.baselineBoomRate)}</small></div>
+                <div><span>Przewaga BOOM vs tło</span><strong class="${walk.boomLift >= 0 ? "positive" : "negative"}">${signedPct(walk.boomLift)}</strong></div>
+                <div><span>Pokrycie liczb vs udział sektorów</span><strong class="${walk.coverageLift >= 0 ? "positive" : "negative"}">${signedPct(walk.coverageLift)}</strong></div>
+            </div>
+            <p>Każdy test bierze wyłącznie losowania wcześniejsze, buduje z nich BOOM Consensus, a dopiero potem sprawdza następne historyczne losowanie. To jest kontrola stabilności reguły, nie obietnica trafienia kolejnego losowania.</p>
+        </div>
+    ` : `
+        <div class="boom-walkforward-card unavailable">
+            <strong>🧪 Walk-forward jeszcze niedostępny</strong>
+            <span>${walk?.message || "Za mało danych historycznych."}</span>
+        </div>
+    `;
 
     mount.innerHTML = `
         <section class="cluster-report-card">
             <div class="cluster-report-head">
                 <div>
-                    <span>💥 BOOM SCANNER • ${analysis.windowSize} LOSOWAŃ</span>
+                    <span>💥 BOOM SCANNER • KOTWICA ${analysis.windowSize} LOSOWAŃ</span>
                     <h2>Najmocniejsze skupiska sektorowe</h2>
+                    <small class="boom-blend-note">Wynik sektora: ${Math.round(analysis.anchorWeight * 100)}% wybrane okno + ${Math.round(analysis.consensusWeight * 100)}% BOOM Consensus.</small>
                 </div>
                 <div class="cluster-target-structure">
                     <small>STRUKTURA DLA ${analysis.targetCount} LICZB</small>
                     <strong>${analysis.structure.join("-")}</strong>
+                    <em>${analysis.concentrationMode}</em>
                 </div>
             </div>
 
@@ -1521,6 +1970,8 @@ function renderClusterBoomReport(analysis) {
                             <span>${analysis.thresholds.label} kul <strong>${sector.clusterDraws}/${analysis.windowSize}</strong></span>
                             <span>${analysis.thresholds.megaLabel} kul <strong>${sector.megaDraws}/${analysis.windowSize}</strong></span>
                             ${currentGame === games.multi ? `<span>dokładnie 5 <strong>${sector.histogram.get(5) || 0}×</strong></span>` : ""}
+                            <span>CONSENSUS <strong>${sector.consensusScore}/100</strong></span>
+                            <span>zgoda okien <strong>${pct(sector.consensusAgreement)}</strong></span>
                             <span>średnio <strong>${sector.average.toFixed(2)}</strong></span>
                             <span>max <strong>${sector.max}</strong></span>
                             <span>trend <strong>${getBoomMomentumLabel(sector.momentum)}</strong></span>
@@ -1535,10 +1986,53 @@ function renderClusterBoomReport(analysis) {
             <div class="cluster-selected-summary">
                 <span>🎯 Generator skoncentruje ${analysis.targetCount} liczb w:</span>
                 <strong>${analysis.selectedSectors.map((sector, index) => `${sector.label} → ${analysis.allocation[index]} liczb`).join(" • ")}</strong>
+                ${analysis.desiredBombSectors > analysis.baseDesiredBombSectors
+                    ? `<small>🛡️ Walk-forward był słabszy, więc silnik celowo rozszerzył koncentrację z ${analysis.baseDesiredBombSectors} do ${analysis.desiredBombSectors} sektorów.</small>`
+                    : ""}
             </div>
 
+            <div class="boom-consensus-section">
+                <div class="boom-section-title">
+                    <div>
+                        <span>🧠 SIGNAL MATRIX</span>
+                        <h3>BOOM Consensus — czy różne okna mówią to samo?</h3>
+                    </div>
+                    <strong>${consensusWindowsText}</strong>
+                </div>
+                <div class="boom-consensus-grid">
+                    ${consensusTop.map((sector, index) => `
+                        <article class="boom-consensus-card ${selectedIndexes.has(sector.index) ? "selected" : ""}">
+                            <div class="boom-consensus-card-head">
+                                <span>#${index + 1} • ${sector.label}</span>
+                                <strong>${sector.score}/100</strong>
+                            </div>
+                            <div class="boom-consensus-meta">
+                                <span>zgoda TOP: <b>${pct(sector.agreement)}</b></span>
+                                <span>stabilność: <b>${pct(sector.stability)}</b></span>
+                            </div>
+                            <div class="boom-window-chips">
+                                ${sector.windowSignals.map(signal => `<i title="ranga #${signal.rank}">${signal.window}: <b>${signal.score}</b></i>`).join("")}
+                            </div>
+                        </article>
+                    `).join("")}
+                </div>
+            </div>
+
+            <div class="boom-participation-section">
+                <div class="boom-section-title">
+                    <div>
+                        <span>🎯 BOOM PARTICIPATION</span>
+                        <h3>Które liczby tworzą rdzeń bomby?</h3>
+                    </div>
+                    <small>liczone tylko w losowaniach, gdy ich sektor był BOOM</small>
+                </div>
+                <div class="boom-participation-grid">${participationPanels}</div>
+            </div>
+
+            ${walkForwardHtml}
+
             <div class="cluster-structure-history">
-                <h3>🧨 TOP struktur z realnymi bombami</h3>
+                <h3>🧨 TOP struktur z realnymi bombami — informacja</h3>
                 <div class="cluster-structure-list">
                     ${topStructures.map((item, index) => `
                         <div class="cluster-structure-row">
@@ -1552,7 +2046,7 @@ function renderClusterBoomReport(analysis) {
             </div>
 
             <div class="cluster-report-note">
-                <strong>Jak to działa:</strong> ranking sektorów liczy, jak często dany zakres naprawdę zbierał duże skupisko w wybranym oknie. Przy wyborze konkretnych liczb generator patrzy tylko na częstotliwość liczb <em>wewnątrz losowań, w których ten sektor był w stanie BOOM</em>. Pary, trójki i czwórki nie wpływają na ten tryb.
+                <strong>Nowy silnik wyboru:</strong> wybrane okno jest kotwicą, ale sektor musi jeszcze przejść przez zgodę 2/3/4/5/10/20, test walk-forward i BOOM Participation. Konkretne liczby dostają wagę za udział w realnych bombach swojego sektora. Pary, trójki, czwórki, suma i parzystość nie wpływają na ten tryb.
             </div>
         </section>
     `;
@@ -1581,9 +2075,19 @@ function generateClusterBoomTicket(analysis) {
 
         for (let pick = 0; pick < quota && pool.length; pick++) {
             const chosen = cryptoWeightedPick(pool, number => {
-                const boomHits = sector.boomNumberHits[number] || 0;
-                const allHits = sector.allNumberHits[number] || 0;
-                return 1 + boomHits * 3 + allHits * 0.25;
+                const participation = sector.participationByNumber?.[number];
+                const boomRate = participation?.boomRate || 0;
+                const recentBoomRate = participation?.recentBoomRate || 0;
+                const allRate = participation?.allRate || 0;
+                const consensusBoost = (sector.consensusScore || 0) / 100;
+
+                // Główna waga pochodzi z udziału liczby w realnych BOOM-ach sektora.
+                // Zwykła częstotliwość jest tylko lekkim tłem, a nie osobnym HOT/COLD.
+                return 0.35 +
+                    boomRate * 10 +
+                    recentBoomRate * 3 +
+                    allRate * 1.25 +
+                    consensusBoost * 1.25;
             });
             selected.push(chosen);
             pool.splice(pool.indexOf(chosen), 1);
@@ -1614,9 +2118,9 @@ function showClusterAssistWorkspace() {
         <section class="standalone-mode-shell">
             ${renderPlayStyleToolbar("💥 AI ASSIST SKUPISKA")}
             <div class="standalone-mode-hero clusters">
-                <span>SEKTORY • STRUKTURY • BOOM HISTORY</span>
+                <span>CONSENSUS • PARTICIPATION • WALK-FORWARD</span>
                 <h1>💥 AI ASSIST SKUPISKA — ${getGameDisplayName()}</h1>
-                <p>Ten tryb nie rozrzuca kuponu po całej planszy. Szuka 2–3 sektorów, które w historii najczęściej robiły duży BOOM, a potem sadza w nich większość lub cały kupon.</p>
+                <p>Silnik szuka BOOM-ów sektorowych, sprawdza zgodę kilku okien, testuje regułę walk-forward i wybiera liczby, które faktycznie uczestniczyły w bombach swoich sektorów.</p>
             </div>
 
             <div id="latestDrawStatus" class="latest-draw-status"></div>
@@ -1627,7 +2131,7 @@ function showClusterAssistWorkspace() {
                     <select id="clusterAssistTargetCount">${getStandaloneTargetOptions(8)}</select>
                 </label>
                 <label>
-                    <span>Okno BOOM</span>
+                    <span>Okno BOOM / kotwica</span>
                     <select id="clusterAssistWindow">
                         ${[2,3,4,5,10,20,30,50,100,200].map(value => `<option value="${value}" ${value === 20 ? "selected" : ""}>ostatnie ${value}</option>`).join("")}
                     </select>
@@ -1638,7 +2142,7 @@ function showClusterAssistWorkspace() {
                         ${[1,2,3,5,10].map(value => `<option value="${value}">${value}</option>`).join("")}
                     </select>
                 </label>
-                <button type="button" class="primary-btn cluster-scan-btn" id="clusterAssistScanBtn">🔎 SKANUJ BOOM</button>
+                <button type="button" class="primary-btn cluster-scan-btn" id="clusterAssistScanBtn">🔎 SKANUJ BOOM + CONSENSUS</button>
                 <button type="button" class="primary-btn cluster-generate-btn" id="clusterAssistGenerateBtn" disabled>💥 GENERUJ W BOMBACH</button>
             </div>
 
@@ -1683,7 +2187,7 @@ function showClusterAssistWorkspace() {
         renderStandaloneTickets(
             tickets,
             "clusterAssistResults",
-            `BOOM ${lastClusterAssistAnalysis.structure.join("-")} • ${lastClusterAssistAnalysis.windowSize} los.`
+            `BOOM CONSENSUS ${lastClusterAssistAnalysis.structure.join("-")} • kotwica ${lastClusterAssistAnalysis.windowSize} los.`
         );
     });
 
