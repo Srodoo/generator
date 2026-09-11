@@ -563,6 +563,14 @@ csvFile.addEventListener("change", (e) => {
 
             const latestDraw = getLatestImportedDraw();
             renderLatestDrawStatus();
+
+            // Po imporcie dane są już w pamięci, ale ekran wyboru stylu mógł zostać
+            // wyrenderowany wcześniej z zablokowanymi trybami AI. Odśwież hub,
+            // żeby AI ANALYST i AI ASSIST SKUPISKA odblokowały się natychmiast.
+            if (contentArea?.classList.contains("play-style-view")) {
+                showGame();
+            }
+
             const labResolvedCount = resolveLaboratoryEntries();
 
             alert(
@@ -592,7 +600,7 @@ csvFile.addEventListener("change", (e) => {
 const contentArea = document.getElementById("contentArea");
 
 
-function showGame(){
+function showGameWorkspace(mode = "manual"){
 stopRngArena();
 contentArea.classList.remove("stats-view", "lab-view", "rng-arena-view", "gierki-view");
 const labels = currentGame.ranges.map((value, index) => {
@@ -948,6 +956,739 @@ ${currentGame.ranges.map((value,index)=>{
     syncMultiCoverageControls();
     updateTicketBatchInfo();
     renderLatestDrawStatus();
+    applyGameWorkspaceMode(mode);
+}
+
+// =========================================================
+// LOTTOFORGE 11.09.2026 — WYBÓR STYLU GRY
+// MANUAL / RANDOM RNG / AI ANALYST / AI ASSIST SKUPISKA
+// =========================================================
+let activeGamePlayStyle = null;
+let lastClusterAssistAnalysis = null;
+
+function getGameDisplayName() {
+    return String(currentGame.title || "LottoForge").replace(/^🎲\s*Generator\s*/i, "").trim();
+}
+
+function renderPlayStyleToolbar(label = "") {
+    return `
+        <div class="play-style-toolbar">
+            <button type="button" class="play-style-back-btn" id="playStyleBackBtn">← Style gry</button>
+            <div class="play-style-current">
+                <span>${getGameDisplayName()}</span>
+                ${label ? `<strong>${label}</strong>` : ""}
+            </div>
+        </div>
+    `;
+}
+
+function bindPlayStyleBackButton() {
+    document.getElementById("playStyleBackBtn")?.addEventListener("click", showGame);
+}
+
+function showGame() {
+    stopRngArena();
+    activeGamePlayStyle = null;
+    lastClusterAssistAnalysis = null;
+    contentArea.classList.remove("stats-view", "lab-view", "rng-arena-view", "gierki-view", "game-workspace-view", "game-mode-manual", "game-mode-analyst", "standalone-mode-view", "random-rng-view", "cluster-assist-view");
+    contentArea.classList.add("play-style-view");
+
+    const drawCount = getCurrentGameDraws().length;
+    const gameName = getGameDisplayName();
+
+    contentArea.innerHTML = `
+        <section class="play-style-hub">
+            <div class="play-style-hero">
+                <span class="play-style-kicker">LOTTOFORGE • ${gameName.toUpperCase()}</span>
+                <h1>Jak chcesz dziś grać?</h1>
+                <p>Najpierw wybierz filozofię generatora. Manual, czysty RNG i analityka nie siedzą już w jednym worku.</p>
+                <div class="play-style-data-status ${drawCount ? "ready" : "empty"}">
+                    ${drawCount
+                        ? `✅ Dane gotowe: <strong>${drawCount.toLocaleString("pl-PL")}</strong> losowań dla ${gameName}`
+                        : `📥 Brak danych historycznych. MANUAL i RANDOM RNG działają od razu; tryby analityczne wymagają importu CSV.`}
+                </div>
+            </div>
+
+            <div id="latestDrawStatus" class="latest-draw-status"></div>
+
+            <div class="play-style-grid">
+                <article class="play-style-card manual">
+                    <div class="play-style-icon">🎛️</div>
+                    <div class="play-style-card-copy">
+                        <span>PEŁNA KONTROLA</span>
+                        <h2>MANUAL</h2>
+                        <p>Struktura, suma, parzystość, obowiązkowe, wykluczenia, systemy i pakiety. Ty ustawiasz reguły, Web Crypto tylko losuje w ich granicach.</p>
+                    </div>
+                    <button type="button" data-play-style="manual">OTWÓRZ MANUAL</button>
+                </article>
+
+                <article class="play-style-card random">
+                    <div class="play-style-icon">🎲</div>
+                    <div class="play-style-card-copy">
+                        <span>ZERO ANALIZY</span>
+                        <h2>RANDOM RNG</h2>
+                        <p>Czysty Web Crypto. Bez HOT/COLD, bez struktur historycznych i bez AUTO FORGE. Tylko niezależne losowanie liczb.</p>
+                    </div>
+                    <button type="button" data-play-style="random">ODPAL RNG</button>
+                </article>
+
+                <article class="play-style-card analyst">
+                    <div class="play-style-icon">🧠</div>
+                    <div class="play-style-card-copy">
+                        <span>PEŁNA ANALITYKA</span>
+                        <h2>AI ANALYST ASSIST</h2>
+                        <p>AUTO FORGE czyta okna, sektory, migrację, aktywne struktury i temperaturę liczb, a potem buduje profil kuponu.</p>
+                    </div>
+                    <button type="button" data-play-style="analyst" ${drawCount ? "" : "disabled"}>ANALIZUJ I GRAJ</button>
+                </article>
+
+                <article class="play-style-card clusters">
+                    <div class="play-style-icon">💥</div>
+                    <div class="play-style-card-copy">
+                        <span>BOOM SEKTOROWY</span>
+                        <h2>AI ASSIST SKUPISKA</h2>
+                        <p>Szuka dziesiątek, w których historycznie najczęściej wpadały duże skupiska. W Multi poluje zwłaszcza na sektory z 4–5+ kulami i koncentruje tam Twój kupon.</p>
+                    </div>
+                    <button type="button" data-play-style="clusters" ${drawCount ? "" : "disabled"}>SZUKAJ BOMB</button>
+                </article>
+            </div>
+
+            <div class="play-style-footnote">
+                Tryby analityczne opisują historię i budują reguły generatora na podstawie danych. Nie zmieniają matematycznych szans niezależnego przyszłego losowania.
+            </div>
+        </section>
+    `;
+
+    renderLatestDrawStatus();
+
+    contentArea.querySelectorAll("[data-play-style]").forEach(button => {
+        button.addEventListener("click", () => {
+            const style = button.dataset.playStyle;
+            activeGamePlayStyle = style;
+
+            if (style === "manual") showGameWorkspace("manual");
+            if (style === "random") showRandomRngWorkspace();
+            if (style === "analyst") showGameWorkspace("analyst");
+            if (style === "clusters") showClusterAssistWorkspace();
+        });
+    });
+}
+
+function applyGameWorkspaceMode(mode = "manual") {
+    activeGamePlayStyle = mode;
+    contentArea.classList.remove("play-style-view", "game-mode-manual", "game-mode-analyst", "standalone-mode-view", "random-rng-view", "cluster-assist-view");
+    contentArea.classList.add("game-workspace-view", `game-mode-${mode}`);
+
+    const mainPanel = contentArea.querySelector(".main-panel");
+    if (!mainPanel) return;
+
+    mainPanel.insertAdjacentHTML(
+        "afterbegin",
+        renderPlayStyleToolbar(mode === "analyst" ? "🧠 AI ANALYST ASSIST" : "🎛️ MANUAL")
+    );
+    bindPlayStyleBackButton();
+
+    const heading = mainPanel.querySelector("h1");
+    const intro = heading?.nextElementSibling;
+    const manualFilters = document.getElementById("manualFiltersPanel");
+    const generateBtn = document.getElementById("generateBtn");
+    const pureRandomBtn = document.getElementById("pureRandomBtn");
+    const autoForgeBtn = document.getElementById("autoForgeBtn");
+    const autoControls = mainPanel.querySelector(".auto-forge-controls");
+    const autoReport = document.getElementById("autoForgeReport");
+
+    if (mode === "manual") {
+        if (heading) heading.textContent = `🎛️ MANUAL — ${getGameDisplayName()}`;
+        if (intro) intro.textContent = "Pełna kontrola nad filtrami. Tutaj nic nie analizuje za Ciebie.";
+        if (pureRandomBtn) pureRandomBtn.style.display = "none";
+        if (autoForgeBtn) autoForgeBtn.style.display = "none";
+        if (autoControls) autoControls.style.display = "none";
+        if (autoReport) autoReport.style.display = "none";
+        if (manualFilters) manualFilters.open = true;
+        if (generateBtn) generateBtn.textContent = "🎛️ GENERUJ Z MOICH USTAWIEŃ";
+        return;
+    }
+
+    if (mode === "analyst") {
+        if (heading) heading.textContent = `🧠 AI ANALYST ASSIST — ${getGameDisplayName()}`;
+        if (intro) intro.textContent = "AUTO FORGE analizuje dane i sam buduje profil. Ręczne filtry są schowane, żeby nie mieszać trybów.";
+        if (generateBtn) generateBtn.style.display = "none";
+        if (pureRandomBtn) pureRandomBtn.style.display = "none";
+        if (manualFilters) manualFilters.style.display = "none";
+        if (autoForgeBtn) autoForgeBtn.textContent = "🧠 ODŚWIEŻ ANALIZĘ";
+
+        if (getCurrentGameDraws().length) {
+            window.setTimeout(() => {
+                try {
+                    runAutoForge();
+                } catch (error) {
+                    console.error("AI ANALYST ASSIST:", error);
+                }
+            }, 0);
+        } else if (autoReport) {
+            autoReport.innerHTML = `<div class="mode-empty-state">📥 Zaimportuj dane historyczne dla tej gry, aby uruchomić analizę.</div>`;
+        }
+    }
+}
+
+function getStandaloneTargetOptions(defaultMulti = 8) {
+    if (currentGame === games.multi) {
+        return Array.from({ length: 10 }, (_, index) => index + 1)
+            .map(value => `<option value="${value}" ${value === defaultMulti ? "selected" : ""}>${value}</option>`)
+            .join("");
+    }
+
+    if (isSystemGame()) {
+        return Array.from(
+            { length: currentGame.systemMax - currentGame.systemMin + 1 },
+            (_, index) => currentGame.systemMin + index
+        ).map(value => `<option value="${value}" ${value === currentGame.count ? "selected" : ""}>${value}${value === currentGame.count ? " — zwykły" : " — system"}</option>`).join("");
+    }
+
+    return `<option value="${currentGame.count}" selected>${currentGame.count}</option>`;
+}
+
+function getStandaloneTargetCount(selectId) {
+    const fallback = currentGame === games.multi ? 8 : currentGame.count;
+    return clamp(Number(document.getElementById(selectId)?.value || fallback), 1, getMaxTicketCount());
+}
+
+function createStandaloneRandomTicket(targetCount) {
+    const ticket = {
+        numbers: cryptoSampleUnique(targetCount, currentGame.max)
+    };
+
+    if (currentGame === games.euro) {
+        ticket.euroNumbers = cryptoSampleUnique(currentGame.euroCount, currentGame.euroMax);
+    }
+
+    if (currentGame === games.extra) {
+        ticket.extraNumber = [cryptoRandomInt(1, currentGame.extraMax)];
+    }
+
+    return ticket;
+}
+
+function renderModeBalls(numbers, type = "main") {
+    return (numbers || []).map(number =>
+        `<span class="mode-result-ball ${type}">${String(number).padStart(2, "0")}</span>`
+    ).join("");
+}
+
+function getModeTicketCopyText(ticket) {
+    return formatSingleGeneratedTicketForCopy(
+        ticket.numbers || [],
+        ticket.euroNumbers || [],
+        ticket.extraNumber || []
+    );
+}
+
+function renderStandaloneTickets(tickets, mountId, title = "Wynik") {
+    const mount = document.getElementById(mountId);
+    if (!mount) return;
+
+    if (!tickets?.length) {
+        mount.innerHTML = "";
+        return;
+    }
+
+    mount.innerHTML = `
+        <section class="mode-results-panel">
+            <div class="mode-results-head">
+                <div>
+                    <span>WYNIK</span>
+                    <strong>${title}</strong>
+                </div>
+                <button type="button" class="mode-copy-all-btn" id="${mountId}CopyAll">📋 Kopiuj wszystko</button>
+            </div>
+            <div class="mode-ticket-grid">
+                ${tickets.map((ticket, index) => {
+                    const structure = getStructureForNumbers(ticket.numbers || []);
+                    const even = (ticket.numbers || []).filter(number => number % 2 === 0).length;
+                    const odd = (ticket.numbers || []).length - even;
+                    const sum = (ticket.numbers || []).reduce((a, b) => a + b, 0);
+                    return `
+                        <article class="mode-ticket-card">
+                            <div class="mode-ticket-title">#${index + 1}</div>
+                            <div class="mode-ticket-balls">${renderModeBalls(ticket.numbers)}</div>
+                            ${ticket.euroNumbers?.length ? `<div class="mode-ticket-secondary"><span>Euro</span>${renderModeBalls(ticket.euroNumbers, "secondary")}</div>` : ""}
+                            ${ticket.extraNumber?.length ? `<div class="mode-ticket-secondary"><span>Extra</span>${renderModeBalls(ticket.extraNumber, "secondary")}</div>` : ""}
+                            <div class="mode-ticket-meta">
+                                <span>Struktura <strong>${structure}</strong></span>
+                                <span>Suma <strong>${sum}</strong></span>
+                                <span>P/N <strong>${even}/${odd}</strong></span>
+                            </div>
+                            <button type="button" class="mode-ticket-copy-btn" data-copy-ticket="${index}">📋 ${getModeTicketCopyText(ticket)}</button>
+                        </article>
+                    `;
+                }).join("")}
+            </div>
+        </section>
+    `;
+
+    mount.querySelectorAll("[data-copy-ticket]").forEach(button => {
+        const index = Number(button.dataset.copyTicket);
+        button.addEventListener("click", () => copyLaboratoryText(getModeTicketCopyText(tickets[index]), button));
+    });
+
+    document.getElementById(`${mountId}CopyAll`)?.addEventListener("click", event => {
+        copyLaboratoryText(tickets.map(getModeTicketCopyText).join("\n"), event.currentTarget);
+    });
+}
+
+function showRandomRngWorkspace() {
+    stopRngArena();
+    activeGamePlayStyle = "random";
+    contentArea.classList.remove("stats-view", "lab-view", "rng-arena-view", "gierki-view", "play-style-view", "game-workspace-view", "game-mode-manual", "game-mode-analyst", "cluster-assist-view");
+    contentArea.classList.add("standalone-mode-view", "random-rng-view");
+
+    contentArea.innerHTML = `
+        <section class="standalone-mode-shell">
+            ${renderPlayStyleToolbar("🎲 RANDOM RNG")}
+            <div class="standalone-mode-hero random">
+                <span>WEB CRYPTO • ZERO ANALIZY</span>
+                <h1>🎲 RANDOM RNG — ${getGameDisplayName()}</h1>
+                <p>Tu nie istnieją HOT, COLD, historia ani AUTO FORGE. Każdy kupon jest czystym, niezależnym losowaniem Web Crypto.</p>
+            </div>
+
+            <div class="mode-control-grid">
+                <label>
+                    <span>Ile liczb w kuponie?</span>
+                    <select id="randomModeTargetCount">${getStandaloneTargetOptions(8)}</select>
+                </label>
+                <label>
+                    <span>Ile kuponów?</span>
+                    <select id="randomModeBatchCount">
+                        ${[1,2,3,5,10,20].map(value => `<option value="${value}">${value}</option>`).join("")}
+                    </select>
+                </label>
+                <button type="button" class="primary-btn random-mode-generate" id="randomModeGenerateBtn">🎲 LOSUJ CRYPTO RNG</button>
+            </div>
+
+            <div class="rng-engine-note">🔐 Każdy zestaw powstaje przez crypto.getRandomValues() + rejection sampling / Fisher–Yates. Żadne dane historyczne nie są odczytywane.</div>
+            <div id="randomModeResults"></div>
+        </section>
+    `;
+
+    bindPlayStyleBackButton();
+
+    document.getElementById("randomModeGenerateBtn")?.addEventListener("click", () => {
+        const targetCount = getStandaloneTargetCount("randomModeTargetCount");
+        const batchCount = clamp(Number(document.getElementById("randomModeBatchCount")?.value || 1), 1, 20);
+        const tickets = Array.from({ length: batchCount }, () => createStandaloneRandomTicket(targetCount));
+        renderStandaloneTickets(tickets, "randomModeResults", `RANDOM RNG • ${targetCount} liczb`);
+    });
+}
+
+function getClusterAssistThresholds() {
+    return currentGame === games.multi
+        ? { cluster: 4, mega: 5, label: "4+", megaLabel: "5+" }
+        : { cluster: 2, mega: 3, label: "2+", megaLabel: "3+" };
+}
+
+function buildClusterBoomAnalysis(windowSize = 20, targetCount = 8) {
+    const draws = getCurrentGameDraws().filter(draw => Array.isArray(draw.liczby) && draw.liczby.length);
+    if (!draws.length) {
+        return { ok: false, message: "Brak danych. Najpierw zaimportuj historię losowań dla tej gry." };
+    }
+
+    const sample = draws.slice(-Math.min(Math.max(2, Number(windowSize) || 20), draws.length));
+    const sectorCount = currentGame.ranges.length;
+    const thresholds = getClusterAssistThresholds();
+    const historicalDrawSize = getHistoricalDrawCount();
+    const halfIndex = Math.max(1, Math.floor(sample.length / 2));
+    const sectorStats = Array.from({ length: sectorCount }, (_, index) => ({
+        index,
+        label: getSectorLabel(index),
+        sum: 0,
+        max: 0,
+        clusterDraws: 0,
+        megaDraws: 0,
+        exactMegaDraws: 0,
+        olderSum: 0,
+        newerSum: 0,
+        olderClusterDraws: 0,
+        newerClusterDraws: 0,
+        lastClusterAgo: null,
+        histogram: new Map(),
+        boomNumberHits: new Array(currentGame.max + 1).fill(0),
+        allNumberHits: new Array(currentGame.max + 1).fill(0)
+    }));
+
+    sample.forEach((draw, drawIndex) => {
+        const counts = new Array(sectorCount).fill(0);
+        const numbersBySector = Array.from({ length: sectorCount }, () => []);
+
+        (draw.liczby || []).forEach(number => {
+            if (!Number.isInteger(number) || number < 1 || number > currentGame.max) return;
+            const sector = getSectorIndex(number);
+            counts[sector]++;
+            numbersBySector[sector].push(number);
+            sectorStats[sector].allNumberHits[number]++;
+        });
+
+        counts.forEach((count, sector) => {
+            const stat = sectorStats[sector];
+            stat.sum += count;
+            stat.max = Math.max(stat.max, count);
+            stat.histogram.set(count, (stat.histogram.get(count) || 0) + 1);
+
+            const isOlder = drawIndex < halfIndex;
+            if (isOlder) stat.olderSum += count;
+            else stat.newerSum += count;
+
+            if (count >= thresholds.cluster) {
+                stat.clusterDraws++;
+                if (isOlder) stat.olderClusterDraws++;
+                else stat.newerClusterDraws++;
+                numbersBySector[sector].forEach(number => stat.boomNumberHits[number]++);
+            }
+            if (count >= thresholds.mega) stat.megaDraws++;
+            if (count === thresholds.mega) stat.exactMegaDraws++;
+        });
+    });
+
+    sectorStats.forEach(stat => {
+        for (let offset = 0; offset < sample.length; offset++) {
+            const draw = sample[sample.length - 1 - offset];
+            const count = (draw.liczby || []).filter(number => getSectorIndex(number) === stat.index).length;
+            if (count >= thresholds.cluster) {
+                stat.lastClusterAgo = offset;
+                break;
+            }
+        }
+
+        const olderN = halfIndex;
+        const newerN = Math.max(1, sample.length - halfIndex);
+        stat.average = stat.sum / sample.length;
+        stat.clusterRate = stat.clusterDraws / sample.length;
+        stat.megaRate = stat.megaDraws / sample.length;
+        stat.olderAverage = stat.olderSum / olderN;
+        stat.newerAverage = stat.newerSum / newerN;
+        stat.olderClusterRate = stat.olderClusterDraws / olderN;
+        stat.newerClusterRate = stat.newerClusterDraws / newerN;
+        stat.momentum = stat.newerClusterRate - stat.olderClusterRate;
+        stat.recency = stat.lastClusterAgo === null
+            ? 0
+            : clamp(1 - stat.lastClusterAgo / Math.max(1, sample.length - 1), 0, 1);
+
+        const density = clamp(stat.average / Math.max(1, historicalDrawSize / sectorCount), 0, 2) / 2;
+        const momentumNorm = clamp(0.5 + stat.momentum * 1.5, 0, 1);
+        stat.score = Math.round(clamp(
+            stat.clusterRate * 42 +
+            stat.megaRate * 34 +
+            density * 10 +
+            momentumNorm * 8 +
+            stat.recency * 6,
+            0,
+            100
+        ));
+    });
+
+    const rankedSectors = [...sectorStats].sort((a, b) =>
+        b.score - a.score ||
+        b.megaRate - a.megaRate ||
+        b.clusterRate - a.clusterRate ||
+        b.average - a.average ||
+        a.index - b.index
+    );
+
+    const desiredBombSectors = targetCount >= 7 ? 3 : targetCount >= 4 ? 2 : 1;
+    const selectedSectors = rankedSectors.slice(0, Math.min(desiredBombSectors, rankedSectors.length));
+    const structure = new Array(sectorCount).fill(0);
+    const allocation = new Array(selectedSectors.length).fill(0);
+
+    selectedSectors.forEach((_, index) => {
+        if (index < targetCount) allocation[index] = 1;
+    });
+
+    let remaining = targetCount - allocation.reduce((a, b) => a + b, 0);
+    if (remaining > 0 && selectedSectors.length) {
+        // Dzielimy resztę proporcjonalnie do realnej "masy" BOOM sektora.
+        // Dzięki temu przy historycznym układzie np. 5 / 4 / 5 i kuponie 8 liczb
+        // naturalnie dostajemy koncentrację bliską 3 / 2 / 3 zamiast 4 / 1 / 3.
+        const strengths = selectedSectors.map(sector => Math.max(
+            0.01,
+            sector.average * (1 + sector.clusterRate + sector.megaRate * 1.5)
+        ));
+        const extraCapacities = selectedSectors.map((sector, index) =>
+            Math.max(0, getSectorBounds(sector.index).capacity - allocation[index])
+        );
+        const extras = apportionScoreCounts(strengths, remaining, extraCapacities);
+        extras.forEach((extra, index) => {
+            allocation[index] += extra;
+        });
+        remaining = targetCount - allocation.reduce((a, b) => a + b, 0);
+    }
+
+    // Awaryjne domknięcie tylko wtedy, gdy pojemność któregoś sektora ograniczyła podział.
+    let guard = 0;
+    while (remaining > 0 && selectedSectors.length && guard < 100) {
+        const index = guard % selectedSectors.length;
+        const capacity = getSectorBounds(selectedSectors[index].index).capacity;
+        if (allocation[index] < capacity) {
+            allocation[index]++;
+            remaining--;
+        }
+        guard++;
+    }
+
+    selectedSectors.forEach((sector, index) => {
+        structure[sector.index] = allocation[index] || 0;
+    });
+
+    const structureMap = new Map();
+    sample.forEach((draw, index) => {
+        const key = getStructureForNumbers(draw.liczby || []);
+        if (!structureMap.has(key)) {
+            structureMap.set(key, { key, count: 0, lastIndex: -1 });
+        }
+        const item = structureMap.get(key);
+        item.count++;
+        item.lastIndex = index;
+    });
+
+    const structureRanking = [...structureMap.values()].map(item => {
+        const values = item.key.split("-").map(Number);
+        const sortedCounts = [...values].sort((a, b) => b - a);
+        const boomCells = values.filter(value => value >= thresholds.cluster).length;
+        const megaCells = values.filter(value => value >= thresholds.mega).length;
+        const topDensity = sortedCounts.slice(0, 3).reduce((a, b) => a + b, 0);
+        const rate = item.count / sample.length;
+        const drawsAgo = sample.length - 1 - item.lastIndex;
+        const recency = clamp(1 - drawsAgo / Math.max(1, sample.length - 1), 0, 1);
+        const score = rate * 50 + (boomCells / Math.max(1, sectorCount)) * 18 + (megaCells / Math.max(1, sectorCount)) * 22 + recency * 10;
+        return { ...item, values, boomCells, megaCells, topDensity, rate, drawsAgo, score };
+    }).sort((a, b) =>
+        b.score - a.score || b.count - a.count || b.megaCells - a.megaCells || b.topDensity - a.topDensity
+    );
+
+    return {
+        ok: true,
+        windowSize: sample.length,
+        requestedWindow: Number(windowSize) || 20,
+        targetCount,
+        thresholds,
+        sectorStats,
+        rankedSectors,
+        selectedSectors,
+        allocation,
+        structure,
+        structureRanking,
+        historicalDrawSize,
+        sample
+    };
+}
+
+function getBoomMomentumLabel(value) {
+    if (value > 0.08) return "↑ rośnie";
+    if (value < -0.08) return "↓ spada";
+    return "→ stabilnie";
+}
+
+function renderClusterBoomReport(analysis) {
+    const mount = document.getElementById("clusterAssistReport");
+    if (!mount) return;
+
+    if (!analysis?.ok) {
+        mount.innerHTML = `<div class="mode-empty-state">${analysis?.message || "Brak analizy."}</div>`;
+        return;
+    }
+
+    const selectedIndexes = new Set(analysis.selectedSectors.map(item => item.index));
+    const topStructures = analysis.structureRanking.slice(0, 5);
+
+    mount.innerHTML = `
+        <section class="cluster-report-card">
+            <div class="cluster-report-head">
+                <div>
+                    <span>💥 BOOM SCANNER • ${analysis.windowSize} LOSOWAŃ</span>
+                    <h2>Najmocniejsze skupiska sektorowe</h2>
+                </div>
+                <div class="cluster-target-structure">
+                    <small>STRUKTURA DLA ${analysis.targetCount} LICZB</small>
+                    <strong>${analysis.structure.join("-")}</strong>
+                </div>
+            </div>
+
+            <div class="cluster-bomb-grid">
+                ${analysis.rankedSectors.map((sector, rank) => `
+                    <article class="cluster-bomb-card ${selectedIndexes.has(sector.index) ? "selected" : ""}">
+                        <div class="cluster-bomb-rank">#${rank + 1}</div>
+                        <div class="cluster-bomb-sector">${sector.label}</div>
+                        <div class="cluster-bomb-score">${sector.score}<small>/100</small></div>
+                        <div class="cluster-bomb-metrics">
+                            <span>${analysis.thresholds.label} kul <strong>${sector.clusterDraws}/${analysis.windowSize}</strong></span>
+                            <span>${analysis.thresholds.megaLabel} kul <strong>${sector.megaDraws}/${analysis.windowSize}</strong></span>
+                            ${currentGame === games.multi ? `<span>dokładnie 5 <strong>${sector.histogram.get(5) || 0}×</strong></span>` : ""}
+                            <span>średnio <strong>${sector.average.toFixed(2)}</strong></span>
+                            <span>max <strong>${sector.max}</strong></span>
+                            <span>trend <strong>${getBoomMomentumLabel(sector.momentum)}</strong></span>
+                        </div>
+                        ${selectedIndexes.has(sector.index)
+                            ? `<div class="cluster-selected-badge">💣 BOMBA WYBRANA DO KUPONU</div>`
+                            : ""}
+                    </article>
+                `).join("")}
+            </div>
+
+            <div class="cluster-selected-summary">
+                <span>🎯 Generator skoncentruje ${analysis.targetCount} liczb w:</span>
+                <strong>${analysis.selectedSectors.map((sector, index) => `${sector.label} → ${analysis.allocation[index]} liczb`).join(" • ")}</strong>
+            </div>
+
+            <div class="cluster-structure-history">
+                <h3>🧨 TOP struktur z realnymi bombami</h3>
+                <div class="cluster-structure-list">
+                    ${topStructures.map((item, index) => `
+                        <div class="cluster-structure-row">
+                            <span>#${index + 1}</span>
+                            <strong>${item.key}</strong>
+                            <em>${item.count}× / ${analysis.windowSize}</em>
+                            <small>${item.boomCells} sektorów ${analysis.thresholds.label} • ${item.megaCells} sektorów ${analysis.thresholds.megaLabel} • ostatnio ${item.drawsAgo === 0 ? "teraz" : `${item.drawsAgo} los. temu`}</small>
+                        </div>
+                    `).join("") || `<div class="mode-empty-state">Brak powtarzalnych struktur w tym oknie.</div>`}
+                </div>
+            </div>
+
+            <div class="cluster-report-note">
+                <strong>Jak to działa:</strong> ranking sektorów liczy, jak często dany zakres naprawdę zbierał duże skupisko w wybranym oknie. Przy wyborze konkretnych liczb generator patrzy tylko na częstotliwość liczb <em>wewnątrz losowań, w których ten sektor był w stanie BOOM</em>. Pary, trójki i czwórki nie wpływają na ten tryb.
+            </div>
+        </section>
+    `;
+}
+
+function cryptoWeightedPick(pool, weightResolver) {
+    if (!pool.length) return null;
+    const weights = pool.map(item => Math.max(0.001, Number(weightResolver(item)) || 0.001));
+    const total = weights.reduce((a, b) => a + b, 0);
+    let cursor = cryptoRandomFloat() * total;
+    for (let index = 0; index < pool.length; index++) {
+        cursor -= weights[index];
+        if (cursor <= 0) return pool[index];
+    }
+    return pool[pool.length - 1];
+}
+
+function generateClusterBoomTicket(analysis) {
+    const selected = [];
+
+    analysis.selectedSectors.forEach((sector, selectedIndex) => {
+        const quota = analysis.allocation[selectedIndex] || 0;
+        const bounds = getSectorBounds(sector.index);
+        const pool = [];
+        for (let number = bounds.start; number <= bounds.end; number++) pool.push(number);
+
+        for (let pick = 0; pick < quota && pool.length; pick++) {
+            const chosen = cryptoWeightedPick(pool, number => {
+                const boomHits = sector.boomNumberHits[number] || 0;
+                const allHits = sector.allNumberHits[number] || 0;
+                return 1 + boomHits * 3 + allHits * 0.25;
+            });
+            selected.push(chosen);
+            pool.splice(pool.indexOf(chosen), 1);
+        }
+    });
+
+    while (selected.length < analysis.targetCount) {
+        const remainingPool = Array.from({ length: currentGame.max }, (_, index) => index + 1)
+            .filter(number => !selected.includes(number));
+        if (!remainingPool.length) break;
+        selected.push(remainingPool[cryptoRandomInt(0, remainingPool.length - 1)]);
+    }
+
+    const ticket = { numbers: selected.sort((a, b) => a - b) };
+    if (currentGame === games.euro) ticket.euroNumbers = cryptoSampleUnique(currentGame.euroCount, currentGame.euroMax);
+    if (currentGame === games.extra) ticket.extraNumber = [cryptoRandomInt(1, currentGame.extraMax)];
+    return ticket;
+}
+
+function showClusterAssistWorkspace() {
+    stopRngArena();
+    activeGamePlayStyle = "clusters";
+    lastClusterAssistAnalysis = null;
+    contentArea.classList.remove("stats-view", "lab-view", "rng-arena-view", "gierki-view", "play-style-view", "game-workspace-view", "game-mode-manual", "game-mode-analyst", "random-rng-view");
+    contentArea.classList.add("standalone-mode-view", "cluster-assist-view");
+
+    contentArea.innerHTML = `
+        <section class="standalone-mode-shell">
+            ${renderPlayStyleToolbar("💥 AI ASSIST SKUPISKA")}
+            <div class="standalone-mode-hero clusters">
+                <span>SEKTORY • STRUKTURY • BOOM HISTORY</span>
+                <h1>💥 AI ASSIST SKUPISKA — ${getGameDisplayName()}</h1>
+                <p>Ten tryb nie rozrzuca kuponu po całej planszy. Szuka 2–3 sektorów, które w historii najczęściej robiły duży BOOM, a potem sadza w nich większość lub cały kupon.</p>
+            </div>
+
+            <div id="latestDrawStatus" class="latest-draw-status"></div>
+
+            <div class="mode-control-grid cluster-controls">
+                <label>
+                    <span>Ile liczb typować?</span>
+                    <select id="clusterAssistTargetCount">${getStandaloneTargetOptions(8)}</select>
+                </label>
+                <label>
+                    <span>Okno BOOM</span>
+                    <select id="clusterAssistWindow">
+                        ${[10,20,30,50,100,200].map(value => `<option value="${value}" ${value === 20 ? "selected" : ""}>ostatnie ${value}</option>`).join("")}
+                    </select>
+                </label>
+                <label>
+                    <span>Ile kuponów?</span>
+                    <select id="clusterAssistBatchCount">
+                        ${[1,2,3,5,10].map(value => `<option value="${value}">${value}</option>`).join("")}
+                    </select>
+                </label>
+                <button type="button" class="primary-btn cluster-scan-btn" id="clusterAssistScanBtn">🔎 SKANUJ BOOM</button>
+                <button type="button" class="primary-btn cluster-generate-btn" id="clusterAssistGenerateBtn" disabled>💥 GENERUJ W BOMBACH</button>
+            </div>
+
+            <div id="clusterAssistReport"></div>
+            <div id="clusterAssistResults"></div>
+        </section>
+    `;
+
+    bindPlayStyleBackButton();
+    renderLatestDrawStatus();
+
+    const runScan = () => {
+        const targetCount = getStandaloneTargetCount("clusterAssistTargetCount");
+        const windowSize = Number(document.getElementById("clusterAssistWindow")?.value || 20);
+        const analysis = buildClusterBoomAnalysis(windowSize, targetCount);
+        lastClusterAssistAnalysis = analysis;
+        renderClusterBoomReport(analysis);
+        const generateBtn = document.getElementById("clusterAssistGenerateBtn");
+        if (generateBtn) generateBtn.disabled = !analysis.ok;
+        document.getElementById("clusterAssistResults").innerHTML = "";
+        return analysis;
+    };
+
+    document.getElementById("clusterAssistScanBtn")?.addEventListener("click", runScan);
+    document.getElementById("clusterAssistTargetCount")?.addEventListener("change", runScan);
+    document.getElementById("clusterAssistWindow")?.addEventListener("change", runScan);
+
+    document.getElementById("clusterAssistGenerateBtn")?.addEventListener("click", () => {
+        const targetCount = getStandaloneTargetCount("clusterAssistTargetCount");
+        const windowSize = Number(document.getElementById("clusterAssistWindow")?.value || 20);
+        if (
+            !lastClusterAssistAnalysis?.ok ||
+            lastClusterAssistAnalysis.targetCount !== targetCount ||
+            lastClusterAssistAnalysis.requestedWindow !== windowSize
+        ) {
+            runScan();
+        }
+        if (!lastClusterAssistAnalysis?.ok) return;
+
+        const batchCount = clamp(Number(document.getElementById("clusterAssistBatchCount")?.value || 1), 1, 10);
+        const tickets = Array.from({ length: batchCount }, () => generateClusterBoomTicket(lastClusterAssistAnalysis));
+        renderStandaloneTickets(
+            tickets,
+            "clusterAssistResults",
+            `BOOM ${lastClusterAssistAnalysis.structure.join("-")} • ${lastClusterAssistAnalysis.windowSize} los.`
+        );
+    });
+
+    if (getCurrentGameDraws().length) runScan();
+    else renderClusterBoomReport({ ok: false, message: "📥 Najpierw zaimportuj dane historyczne dla tej gry." });
 }
 
 function clamp(value, min, max) {
@@ -2689,11 +3430,12 @@ function buildAutoForgePromisingColdCandidates({
                 1
             );
 
+            // Pary / trójki / czwórki pozostają informacją statystyczną.
+            // Nie podbijają COLD+ ani rankingu przyszłego kuponu.
             const score = Math.round(clamp(
-                sectorNorm * 35 +
-                comebackSignal * 25 +
-                relationSignal * 20 +
-                directionFit * 10 +
+                sectorNorm * 42 +
+                comebackSignal * 30 +
+                directionFit * 18 +
                 rhythmFit * 10,
                 0,
                 100
@@ -3163,8 +3905,9 @@ function buildAutoForgeAnalysis() {
 
         const total = Math.max(
             0.01,
-            sectorComponent + hotColdComponent + returnComponent + pairComponent +
-            tripleComponent + quadComponent + migrationComponent + parityComponent + focusComponent
+            // Historyczne pary / trójki / czwórki NIE sterują wyborem liczby.
+            sectorComponent + hotColdComponent + returnComponent +
+            migrationComponent + parityComponent + focusComponent
         );
 
         numberScores[n] = total;
@@ -3825,10 +4568,7 @@ function buildAutoForgeTicketExplanations(numbers, plan) {
 
         const rawScore = Math.max(
             0.01,
-            (component.total || 0) +
-            pair.normalized * 18 +
-            triple.normalized * 10 +
-            quad.normalized * 5
+            component.total || 0
         );
 
         const relations = [];
@@ -3843,12 +4583,6 @@ function buildAutoForgeTicketExplanations(numbers, plan) {
         }
         if (component.isLatest && component.returnRate > 0) {
             reasons.push(`powrót ${Math.round(component.returnRate * 100)}%`);
-        }
-        if (pair.normalized >= 0.25 && pair.numbers.length) {
-            reasons.push(`mocna para z ${pair.numbers.filter(n => n !== number).join("/")}`);
-        }
-        if (triple.normalized >= 0.20 && triple.numbers.length) {
-            reasons.push("wsparcie trójki");
         }
 
         return {
@@ -4068,7 +4802,7 @@ function renderAutoForgeGenerationResult(analysis, plan, numbers) {
                                 <th>Sektor</th>
                                 <th>Status</th>
                                 <th>Powrót</th>
-                                <th>Relacje</th>
+                                <th>Relacje (info)</th>
                                 <th>AUTO SCORE</th>
                             </tr>
                         </thead>
@@ -4406,7 +5140,7 @@ function renderAutoForgeReport(analysis) {
                     </div>
                     <small class="auto-forge-pattern-note">
                         Procent przy relacji oznacza ważoną częstość współwystąpienia.
-                        Okna relacji: ${analysis.patternWindowsLabel}. Powroty i relacje są wagami wyboru, nie sztywnymi wymogami kuponu.
+                        Okna relacji: ${analysis.patternWindowsLabel}. Pary, trójki i czwórki są wyłącznie informacją statystyczną i nie punktują liczb do przyszłego kuponu.
                     </small>
                 </div>
             </details>
@@ -4497,7 +5231,7 @@ function renderAutoForgeReport(analysis) {
                 <div>
                     <span>ETAP 4 — SILNIK WYBORU LICZB AKTYWNY</span>
                     <strong>Masz teraz lidera danych oraz 2 gorące struktury zamienne.</strong>
-                    <small>Strefa → sektor/skupisko → budżet HOT/MID/COLD+ → powroty/relacje → parzystość → ważone RNG.</small>
+                    <small>Strefa → sektor/skupisko → budżet HOT/MID/COLD+ → powroty → parzystość → ważone RNG. Pary/trójki/czwórki: tylko informacyjnie.</small>
                 </div>
                 <button id="autoForgeGenerateFromProfileBtn" class="primary-btn auto-forge-generate-profile-btn">
                     🧭 GENERUJ PROFILOWY
