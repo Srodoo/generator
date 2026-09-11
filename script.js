@@ -1629,7 +1629,7 @@ function showClusterAssistWorkspace() {
                 <label>
                     <span>Okno BOOM</span>
                     <select id="clusterAssistWindow">
-                        ${[10,20,30,50,100,200].map(value => `<option value="${value}" ${value === 20 ? "selected" : ""}>ostatnie ${value}</option>`).join("")}
+                        ${[2,3,4,5,10,20,30,50,100,200].map(value => `<option value="${value}" ${value === 20 ? "selected" : ""}>ostatnie ${value}</option>`).join("")}
                     </select>
                 </label>
                 <label>
