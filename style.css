@@ -6780,3 +6780,310 @@ button,.primary-btn{border:0;border-radius:11px!important;padding:11px 16px!impo
     .boom-participation-numbers{grid-template-columns:repeat(2,minmax(0,1fr));}
     .boom-participation-head{align-items:flex-start;}
 }
+
+/* =========================================================
+   LOTTOFORGE 12.09.2026 — EVERY SECOND / JACKPOT TRACKER
+   Dokładna runda + zwycięski zestaw + odstęp prób do głównej.
+   Desktop + mobile.
+   ========================================================= */
+#rngArenaJackpotTracker{
+    width:100%;
+    margin:12px 0 16px;
+}
+.rng-arena-jackpot-tracker{
+    width:100%;
+    min-width:0;
+    padding:18px;
+    border-radius:18px;
+    border:1px solid rgba(247,198,92,.24);
+    background:
+        radial-gradient(circle at 100% 0%,rgba(247,198,92,.10),transparent 32%),
+        radial-gradient(circle at 0% 100%,rgba(124,92,255,.07),transparent 30%),
+        linear-gradient(145deg,rgba(18,25,38,.98),rgba(9,14,23,.99));
+    box-shadow:0 16px 38px rgba(0,0,0,.22);
+    overflow:hidden;
+}
+.rng-arena-jackpot-tracker.has-jackpot{
+    border-color:rgba(247,198,92,.48);
+    box-shadow:0 18px 46px rgba(0,0,0,.26),inset 0 0 0 1px rgba(247,198,92,.045);
+}
+.rng-jackpot-head{
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-start;
+    gap:14px;
+}
+.rng-jackpot-head > div{
+    min-width:0;
+    display:flex;
+    flex-direction:column;
+    gap:4px;
+}
+.rng-jackpot-head span{
+    color:#f4cf72;
+    font-size:10px;
+    font-weight:900;
+    letter-spacing:.09em;
+}
+.rng-jackpot-head strong{
+    color:#f4f7ff;
+    font-size:18px;
+    line-height:1.3;
+}
+.rng-jackpot-head small{
+    max-width:760px;
+    color:#7f8da3;
+    font-size:10px;
+    line-height:1.5;
+}
+.rng-jackpot-head > b{
+    flex:0 0 auto;
+    padding:7px 10px;
+    border-radius:999px;
+    color:#f3cf78;
+    background:rgba(247,198,92,.08);
+    border:1px solid rgba(247,198,92,.26);
+    font-size:10px;
+    font-weight:900;
+    white-space:nowrap;
+}
+.rng-jackpot-overview{
+    display:grid;
+    grid-template-columns:repeat(4,minmax(0,1fr));
+    gap:8px;
+    margin-top:14px;
+}
+.rng-jackpot-overview > div{
+    min-width:0;
+    padding:10px 11px;
+    border-radius:11px;
+    background:#0d1420;
+    border:1px solid rgba(93,111,139,.14);
+}
+.rng-jackpot-overview span,
+.rng-jackpot-event-stats span{
+    display:block;
+    margin-bottom:5px;
+    color:#718097;
+    font-size:9px;
+    font-weight:850;
+    text-transform:uppercase;
+    letter-spacing:.055em;
+}
+.rng-jackpot-overview strong{
+    display:block;
+    color:#eef3ff;
+    font-size:14px;
+    overflow-wrap:anywhere;
+}
+.rng-jackpot-player-grid{
+    display:grid;
+    grid-template-columns:repeat(3,minmax(0,1fr));
+    gap:10px;
+    margin-top:10px;
+}
+.rng-jackpot-player-card{
+    min-width:0;
+    padding:12px;
+    border-radius:13px;
+    background:rgba(13,20,32,.92);
+    border:1px solid rgba(96,114,143,.14);
+}
+.rng-jackpot-player-card.rng{border-color:rgba(62,166,255,.22);}
+.rng-jackpot-player-card.me{border-color:rgba(64,216,138,.20);}
+.rng-jackpot-player-card.user2{border-color:rgba(124,92,255,.22);}
+.rng-jackpot-player-card > strong{
+    display:block;
+    margin-bottom:7px;
+    color:#eaf0fb;
+    font-size:12px;
+}
+.rng-jackpot-player-card > div{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:10px;
+    padding:5px 0;
+    border-top:1px solid rgba(94,111,138,.10);
+    color:#748298;
+    font-size:9px;
+}
+.rng-jackpot-player-card > div b{
+    color:#dce5f4;
+    text-align:right;
+    font-size:9px;
+}
+.rng-jackpot-player-card > small{
+    display:block;
+    margin-top:7px;
+    color:#68778d;
+    font-size:9px;
+    line-height:1.4;
+}
+.rng-jackpot-history-head{
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-end;
+    gap:12px;
+    margin-top:17px;
+    padding-top:15px;
+    border-top:1px solid rgba(112,128,156,.14);
+}
+.rng-jackpot-history-head strong{color:#f0f4fb;font-size:13px;}
+.rng-jackpot-history-head small{color:#728097;font-size:9px;text-align:right;}
+.rng-jackpot-history{
+    display:grid;
+    gap:10px;
+    margin-top:10px;
+}
+.rng-jackpot-event{
+    min-width:0;
+    padding:13px;
+    border-radius:14px;
+    background:linear-gradient(180deg,rgba(15,22,34,.98),rgba(10,15,24,.98));
+    border:1px solid rgba(105,124,154,.16);
+}
+.rng-jackpot-event.latest{
+    border-color:rgba(247,198,92,.42);
+    background:
+        radial-gradient(circle at 100% 0%,rgba(247,198,92,.08),transparent 36%),
+        linear-gradient(180deg,rgba(18,25,38,.98),rgba(10,15,24,.98));
+}
+.rng-jackpot-event-head{
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-start;
+    gap:10px;
+}
+.rng-jackpot-event-head > div{
+    min-width:0;
+    display:flex;
+    flex-direction:column;
+    gap:3px;
+}
+.rng-jackpot-event-head span{
+    color:#f4cf72;
+    font-size:9px;
+    font-weight:900;
+    letter-spacing:.07em;
+}
+.rng-jackpot-event-head strong{color:#edf3ff;font-size:13px;}
+.rng-jackpot-event-head > b{
+    flex:0 0 auto;
+    color:#8acaff;
+    font-size:11px;
+    white-space:nowrap;
+}
+.rng-jackpot-event-stats{
+    display:grid;
+    grid-template-columns:repeat(4,minmax(0,1fr));
+    gap:7px;
+    margin-top:10px;
+}
+.rng-jackpot-event-stats > div{
+    min-width:0;
+    padding:8px 9px;
+    border-radius:10px;
+    background:#0c131f;
+    border:1px solid rgba(94,111,138,.12);
+}
+.rng-jackpot-event-stats strong{
+    display:block;
+    color:#dfe8f6;
+    font-size:10px;
+    overflow-wrap:anywhere;
+}
+.rng-jackpot-ticket-block,
+.rng-jackpot-draw-block{
+    margin-top:10px;
+    padding:10px;
+    border-radius:11px;
+    background:rgba(9,14,22,.72);
+    border:1px solid rgba(94,111,138,.11);
+}
+.rng-jackpot-ticket-block{border-color:rgba(247,198,92,.16);}
+.rng-jackpot-row-title{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    gap:10px;
+}
+.rng-jackpot-row-title span{color:#dce5f4;font-size:10px;font-weight:850;}
+.rng-jackpot-row-title small{color:#718097;font-size:9px;text-align:right;}
+.rng-jackpot-balls,
+.rng-jackpot-secondary-row > div{
+    display:flex;
+    flex-wrap:wrap;
+    gap:4px;
+    margin-top:8px;
+}
+.rng-jackpot-ball{
+    width:31px;
+    height:31px;
+    flex:0 0 31px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    border-radius:50%;
+    color:#f7f9ff;
+    background:radial-gradient(circle at 32% 25%,#fff 0 4%,#b99f58 5%,#765f25 31%,#2d271a 75%,#17140e 100%);
+    border:1px solid rgba(247,198,92,.42);
+    box-shadow:inset -5px -6px 10px rgba(0,0,0,.30),0 5px 12px rgba(0,0,0,.20);
+    font-size:9px;
+    font-weight:900;
+}
+.rng-jackpot-ball.secondary{border-color:rgba(124,92,255,.48);background:radial-gradient(circle at 32% 25%,#fff 0 4%,#a99bff 5%,#6151b6 31%,#29214f 75%,#151127 100%);}
+.rng-jackpot-ball.draw{border-color:rgba(62,166,255,.48);background:radial-gradient(circle at 32% 25%,#fff 0 4%,#82c9ff 5%,#347daf 31%,#17344c 75%,#0c1a26 100%);}
+.rng-jackpot-secondary-row{
+    margin-top:8px;
+    padding-top:8px;
+    border-top:1px solid rgba(93,111,139,.10);
+}
+.rng-jackpot-secondary-row > span{color:#708097;font-size:9px;font-weight:800;}
+.rng-jackpot-copy-btn{
+    width:100%;
+    min-height:42px;
+    margin-top:10px!important;
+}
+.rng-jackpot-waiting{
+    margin-top:12px;
+    padding:11px 12px;
+    border-radius:10px;
+    background:rgba(247,198,92,.045);
+    border:1px solid rgba(247,198,92,.13);
+    color:#8795aa;
+    font-size:10px;
+    line-height:1.5;
+}
+.rng-jackpot-empty{color:#68778d;font-size:10px;}
+
+@media(max-width:1050px){
+    .rng-jackpot-player-grid{grid-template-columns:1fr;}
+    .rng-jackpot-event-stats{grid-template-columns:1fr 1fr;}
+}
+
+@media(max-width:899px){
+    #rngArenaJackpotTracker{margin:10px 0 13px;}
+    .rng-arena-jackpot-tracker{padding:14px;border-radius:15px;}
+    .rng-jackpot-head{flex-direction:column;gap:8px;}
+    .rng-jackpot-head > b{align-self:flex-start;}
+    .rng-jackpot-overview{grid-template-columns:1fr 1fr;gap:7px;}
+    .rng-jackpot-player-grid{grid-template-columns:1fr;gap:7px;}
+    .rng-jackpot-history-head{align-items:flex-start;flex-direction:column;gap:4px;}
+    .rng-jackpot-history-head small{text-align:left;}
+    .rng-jackpot-event{padding:11px;}
+    .rng-jackpot-event-stats{grid-template-columns:1fr 1fr;gap:6px;}
+    .rng-jackpot-row-title{align-items:flex-start;flex-direction:column;gap:2px;}
+    .rng-jackpot-row-title small{text-align:left;}
+    .rng-jackpot-ball{width:34px;height:34px;flex-basis:34px;font-size:10px;}
+    .rng-jackpot-copy-btn{min-height:44px;}
+}
+
+@media(max-width:480px){
+    .rng-jackpot-overview,
+    .rng-jackpot-event-stats{grid-template-columns:1fr;}
+    .rng-jackpot-event-head{flex-direction:column;gap:5px;}
+    .rng-jackpot-event-head > b{white-space:normal;}
+    .rng-jackpot-player-card > div{flex-direction:column;gap:2px;}
+    .rng-jackpot-player-card > div b{text-align:left;}
+}

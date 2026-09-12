@@ -9996,6 +9996,240 @@ function makeRngArenaCompetitor(label) {
 }
 
 // =========================================================
+// LOTTOFORGE — EVERY SECOND / HISTORIA GŁÓWNYCH WYGRANYCH
+// Zapamiętuje dokładną rundę, zwycięski zestaw i odstęp rund
+// potrzebny do trafienia głównego poziomu dla każdego zawodnika.
+// Historia widoczna w UI jest ograniczona, ale liczniki obejmują całą sesję.
+// =========================================================
+const RNG_ARENA_JACKPOT_HISTORY_LIMIT = 30;
+
+function createRngArenaJackpotCompetitorStats() {
+    return {
+        count: 0,
+        firstRound: null,
+        lastRound: null,
+        lastGap: null,
+        gapSum: 0,
+        minGap: null,
+        maxGap: null
+    };
+}
+
+function createRngArenaJackpotTracker(gameKey = "mini") {
+    return {
+        gameKey,
+        total: 0,
+        first: null,
+        last: null,
+        nextId: 1,
+        events: [],
+        byCompetitor: {
+            rng: createRngArenaJackpotCompetitorStats(),
+            me: createRngArenaJackpotCompetitorStats(),
+            user2: createRngArenaJackpotCompetitorStats()
+        }
+    };
+}
+
+function getRngArenaJackpotLabel(gameKey = rngArenaState?.gameKey, pickCount = getRngArenaPickCount()) {
+    if (gameKey === "mini") return "5/5 — główna wygrana";
+    if (gameKey === "lotto") return "6/6 — główna wygrana";
+    if (gameKey === "euro") return "5+2 — główna wygrana";
+    if (gameKey === "multi") return `${pickCount}/${pickCount} — główna wygrana`;
+    if (gameKey === "extra") return "5+1 — główna wygrana";
+    return "Główna wygrana";
+}
+
+function resetRngArenaJackpotTracker() {
+    if (!rngArenaState) return;
+    rngArenaState.jackpotTracker = createRngArenaJackpotTracker(rngArenaState.gameKey);
+}
+
+function recordRngArenaJackpot({
+    key,
+    competitor,
+    draw,
+    secondaryDraw,
+    mainHits,
+    secondaryHits,
+    roundCost,
+    roundPrize,
+    pickCount
+}) {
+    if (!rngArenaState || !competitor) return null;
+    if (!rngArenaState.jackpotTracker) {
+        rngArenaState.jackpotTracker = createRngArenaJackpotTracker(rngArenaState.gameKey);
+    }
+
+    const tracker = rngArenaState.jackpotTracker;
+    if (!tracker.byCompetitor[key]) {
+        tracker.byCompetitor[key] = createRngArenaJackpotCompetitorStats();
+    }
+
+    const stats = tracker.byCompetitor[key];
+    const round = Number(rngArenaState.rounds || 0);
+    // Dla pierwszej głównej liczymy od startu sesji; dla kolejnych od poprzedniej
+    // głównej wygranej tego samego zawodnika.
+    const roundsNeeded = stats.lastRound == null ? round : Math.max(0, round - stats.lastRound);
+
+    stats.count++;
+    stats.firstRound ??= round;
+    stats.lastRound = round;
+    stats.lastGap = roundsNeeded;
+    stats.gapSum += roundsNeeded;
+    stats.minGap = stats.minGap == null ? roundsNeeded : Math.min(stats.minGap, roundsNeeded);
+    stats.maxGap = stats.maxGap == null ? roundsNeeded : Math.max(stats.maxGap, roundsNeeded);
+
+    const event = {
+        id: tracker.nextId++,
+        gameKey: rngArenaState.gameKey,
+        round,
+        roundsNeeded,
+        competitorKey: key,
+        competitorLabel: competitor.label,
+        jackpotLabel: getRngArenaJackpotLabel(rngArenaState.gameKey, pickCount),
+        ticket: [...(competitor.ticket || [])],
+        secondary: [...(competitor.secondary || [])],
+        draw: [...(draw || [])],
+        secondaryDraw: [...(secondaryDraw || [])],
+        mainHits,
+        secondaryHits,
+        roundCost: Number(roundCost || 0),
+        costSincePrevious: Number(roundCost || 0) * roundsNeeded,
+        spentToHit: Number(competitor.spent || 0),
+        prize: Number(roundPrize || 0),
+        sequenceForCompetitor: stats.count
+    };
+
+    tracker.total++;
+    tracker.first ??= event;
+    tracker.last = event;
+    tracker.events.push(event);
+    if (tracker.events.length > RNG_ARENA_JACKPOT_HISTORY_LIMIT) {
+        tracker.events.splice(0, tracker.events.length - RNG_ARENA_JACKPOT_HISTORY_LIMIT);
+    }
+
+    return event;
+}
+
+function formatRngArenaJackpotTicket(event) {
+    if (!event) return "";
+    const main = (event.ticket || []).join(",");
+    if (!(event.secondary || []).length) return main;
+    const config = RNG_ARENA_GAME_CONFIG[event.gameKey] || getRngArenaConfig();
+    const label = config.secondary?.label || "Dodatkowe";
+    return `${main} | ${label}:${event.secondary.join(",")}`;
+}
+
+function renderRngArenaJackpotMiniBalls(numbers = [], variant = "main") {
+    if (!numbers.length) return `<span class="rng-jackpot-empty">—</span>`;
+    return numbers.map(number => `
+        <span class="rng-jackpot-ball ${variant}">${String(number).padStart(2, "0")}</span>
+    `).join("");
+}
+
+function renderRngArenaJackpotTracker() {
+    const tracker = rngArenaState?.jackpotTracker;
+    if (!tracker) return "";
+
+    const config = getRngArenaConfig();
+    const activeEntries = getRngArenaActiveCompetitorEntries();
+    const firstRoundText = tracker.first ? `#${tracker.first.round.toLocaleString("pl-PL")}` : "—";
+    const lastRoundText = tracker.last ? `#${tracker.last.round.toLocaleString("pl-PL")}` : "—";
+    const currentRounds = Math.max(0, Number(rngArenaState.rounds || 0));
+
+    const playerCards = activeEntries.map(([key, competitor]) => {
+        const stats = tracker.byCompetitor[key] || createRngArenaJackpotCompetitorStats();
+        const averageGap = stats.count ? stats.gapSum / stats.count : 0;
+        const waitingRounds = stats.lastRound == null
+            ? currentRounds
+            : Math.max(0, currentRounds - stats.lastRound);
+        return `
+            <article class="rng-jackpot-player-card ${key}">
+                <strong>${competitor.label}</strong>
+                <div><span>Główne wygrane</span><b>${stats.count.toLocaleString("pl-PL")}</b></div>
+                <div><span>Pierwsza padła po</span><b>${stats.firstRound == null ? "—" : `${stats.firstRound.toLocaleString("pl-PL")} rundach`}</b></div>
+                <div><span>Ostatnio potrzebował</span><b>${stats.lastGap == null ? "—" : `${stats.lastGap.toLocaleString("pl-PL")} rund`}</b></div>
+                <div><span>Średnio 1 na</span><b>${stats.count ? `${Math.round(averageGap).toLocaleString("pl-PL")} rund` : "—"}</b></div>
+                <small>${stats.count ? `Od ostatniej głównej: ${waitingRounds.toLocaleString("pl-PL")} rund` : `Bez głównej od startu: ${waitingRounds.toLocaleString("pl-PL")} rund`}</small>
+            </article>
+        `;
+    }).join("");
+
+    const history = [...tracker.events].reverse().map((event, index) => {
+        const isLatest = index === 0;
+        const secondaryTicket = event.secondary?.length
+            ? `<div class="rng-jackpot-secondary-row"><span>${config.secondary?.label || "Dodatkowe"}</span><div>${renderRngArenaJackpotMiniBalls(event.secondary, "secondary")}</div></div>`
+            : "";
+        const secondaryDraw = event.secondaryDraw?.length
+            ? `<div class="rng-jackpot-secondary-row draw"><span>Losowanie ${config.secondary?.label || "dodatkowe"}</span><div>${renderRngArenaJackpotMiniBalls(event.secondaryDraw, "draw")}</div></div>`
+            : "";
+        return `
+            <article class="rng-jackpot-event ${isLatest ? "latest" : ""}">
+                <div class="rng-jackpot-event-head">
+                    <div>
+                        <span>${isLatest ? "🔥 NAJNOWSZA" : `TRAFIENIE #${event.sequenceForCompetitor}`}</span>
+                        <strong>${event.competitorLabel}</strong>
+                    </div>
+                    <b>runda #${event.round.toLocaleString("pl-PL")}</b>
+                </div>
+                <div class="rng-jackpot-event-stats">
+                    <div><span>Potrzebował</span><strong>${event.roundsNeeded.toLocaleString("pl-PL")} rund</strong></div>
+                    <div><span>Koszt tego odcinka</span><strong>${formatRngArenaMoney(event.costSincePrevious)}</strong></div>
+                    <div><span>Wygrana tej rundy</span><strong>${formatRngArenaMoney(event.prize)}</strong></div>
+                    <div><span>Wydane do tej rundy</span><strong>${formatRngArenaMoney(event.spentToHit)}</strong></div>
+                </div>
+                <div class="rng-jackpot-ticket-block">
+                    <div class="rng-jackpot-row-title"><span>🏆 Zwycięski zestaw</span><small>${event.jackpotLabel}</small></div>
+                    <div class="rng-jackpot-balls">${renderRngArenaJackpotMiniBalls(event.ticket, "ticket")}</div>
+                    ${secondaryTicket}
+                    <button type="button" class="lab-secondary-btn rng-jackpot-copy-btn" data-rng-jackpot-copy="${event.id}">📋 Kopiuj zestaw</button>
+                </div>
+                <div class="rng-jackpot-draw-block">
+                    <div class="rng-jackpot-row-title"><span>🎯 Wynik losowania</span><small>dokładnie ta runda</small></div>
+                    <div class="rng-jackpot-balls">${renderRngArenaJackpotMiniBalls(event.draw, "draw")}</div>
+                    ${secondaryDraw}
+                </div>
+            </article>
+        `;
+    }).join("");
+
+    return `
+        <section class="rng-arena-jackpot-tracker ${tracker.total ? "has-jackpot" : "waiting"}">
+            <div class="rng-jackpot-head">
+                <div>
+                    <span>🏆 GŁÓWNA WYGRANA — LICZNIK PRÓB</span>
+                    <strong>${getRngArenaJackpotLabel(rngArenaState.gameKey, getRngArenaPickCount())}</strong>
+                    <small>Zapisuje dokładną rundę i zestaw, który trafił główny poziom. RESET STATYSTYK czyści tę historię.</small>
+                </div>
+                <b>${tracker.total.toLocaleString("pl-PL")} trafień</b>
+            </div>
+            <div class="rng-jackpot-overview">
+                <div><span>Łącznie głównych</span><strong>${tracker.total.toLocaleString("pl-PL")}</strong></div>
+                <div><span>Pierwsza padła w</span><strong>${firstRoundText}</strong></div>
+                <div><span>Ostatnia padła w</span><strong>${lastRoundText}</strong></div>
+                <div><span>Aktualnie rund</span><strong>${currentRounds.toLocaleString("pl-PL")}</strong></div>
+            </div>
+            <div class="rng-jackpot-player-grid">${playerCards}</div>
+            ${tracker.total
+                ? `<div class="rng-jackpot-history-head"><strong>📚 Historia głównych trafień</strong><small>Pokazuję ostatnie ${Math.min(tracker.events.length, RNG_ARENA_JACKPOT_HISTORY_LIMIT)}; statystyki powyżej liczą całą sesję.</small></div><div class="rng-jackpot-history">${history}</div>`
+                : `<div class="rng-jackpot-waiting">Jeszcze nie padła główna nagroda. Licznik prób działa od rundy #1 i przy trafieniu zachowa dokładny zwycięski zestaw.</div>`}
+        </section>
+    `;
+}
+
+function bindRngArenaJackpotEvents() {
+    document.querySelectorAll("[data-rng-jackpot-copy]").forEach(button => {
+        button.addEventListener("click", () => {
+            const id = Number(button.dataset.rngJackpotCopy || 0);
+            const event = rngArenaState?.jackpotTracker?.events?.find(item => item.id === id);
+            if (!event) return;
+            copyLaboratoryText(formatRngArenaJackpotTicket(event), button);
+        });
+    });
+}
+
+// =========================================================
 // LOTTOFORGE — GOLDEN TICKET / RNG SCOUT
 // Analizuje WYŁĄCZNIE główne wirtualne losowania Areny.
 // 70% sesji = TRAIN, 30% = TEST na niewidzianych losowaniach.
@@ -10661,6 +10895,7 @@ function createRngArenaState(gameKey = "mini") {
         sessionSummary: null,
         lastWinEvent: null,
         firstPerfect: null,
+        jackpotTracker: createRngArenaJackpotTracker(key),
         lastDraw: [],
         lastSecondaryDraw: [],
         scout: createRngArenaScoutState(key),
@@ -10854,6 +11089,7 @@ function resetRngArenaStats(keepTickets = true) {
     rngArenaState.ties = 0;
     rngArenaState.firstPerfect = null;
     rngArenaState.lastWinEvent = null;
+    resetRngArenaJackpotTracker();
     rngArenaState.lastDraw = [];
     rngArenaState.lastSecondaryDraw = [];
     rngArenaState.sessionCompleted = false;
@@ -10972,11 +11208,24 @@ function runRngArenaRound(scoutContext = null) {
 
         if (isRngArenaPerfect(mainHits, secondaryHits, config, pickCount)) {
             competitor.perfects++;
+            recordRngArenaJackpot({
+                key,
+                competitor,
+                draw,
+                secondaryDraw,
+                mainHits,
+                secondaryHits,
+                roundCost,
+                roundPrize,
+                pickCount
+            });
             if (!rngArenaState.firstPerfect) {
                 rngArenaState.firstPerfect = {
                     key,
                     label: competitor.label,
-                    round: rngArenaState.rounds
+                    round: rngArenaState.rounds,
+                    ticket: [...(competitor.ticket || [])],
+                    secondary: [...(competitor.secondary || [])]
                 };
             }
         }
@@ -11022,11 +11271,15 @@ function buildRngArenaSessionSummary() {
         const best = config.secondary
             ? `${competitor.bestMain}/${getRngArenaMainResultDenominator(config)} + ${competitor.bestSecondary}/${getRngArenaSecondaryResultDenominator(config)}`
             : `${competitor.bestMain}/${getRngArenaMainResultDenominator(config)}`;
+        const jackpotStats = rngArenaState.jackpotTracker?.byCompetitor?.[key] || createRngArenaJackpotCompetitorStats();
         return {
             key,
             label: competitor.label,
             wins: competitor.wins,
             perfects: competitor.perfects,
+            jackpots: jackpotStats.count,
+            firstJackpotRound: jackpotStats.firstRound,
+            averageJackpotGap: jackpotStats.count ? jackpotStats.gapSum / jackpotStats.count : 0,
             best,
             spent: competitor.spent,
             won: competitor.won,
@@ -11097,6 +11350,9 @@ function renderRngArenaSessionSummary() {
                 <div><span>Wygrane rundy</span><b>${row.wins.toLocaleString("pl-PL")}</b></div>
                 <div><span>Najlepszy wynik</span><b>${row.best}</b></div>
                 <div><span>Pełne trafienia</span><b>${row.perfects.toLocaleString("pl-PL")}</b></div>
+                <div><span>Główne wygrane</span><b>${row.jackpots.toLocaleString("pl-PL")}</b></div>
+                <div><span>Pierwsza główna</span><b>${row.firstJackpotRound == null ? "—" : `#${row.firstJackpotRound.toLocaleString("pl-PL")}`}</b></div>
+                <div><span>Średnio do głównej</span><b>${row.jackpots ? `${Math.round(row.averageJackpotGap).toLocaleString("pl-PL")} rund` : "—"}</b></div>
                 <div><span>Wydane</span><b>${formatRngArenaMoney(row.spent)}</b></div>
                 <div><span>Wygrane</span><b>${formatRngArenaMoney(row.won)}</b></div>
                 <div class="${balanceClass}"><span>Bilans</span><b>${row.balance > 0 ? "+" : ""}${formatRngArenaMoney(row.balance)}</b></div>
@@ -11279,6 +11535,7 @@ function renderRngArenaLive() {
     const secondaryDraw = document.getElementById("rngArenaSecondaryDraw");
     const players = document.getElementById("rngArenaPlayers");
     const firstPerfect = document.getElementById("rngArenaFirstPerfect");
+    const jackpotHost = document.getElementById("rngArenaJackpotTracker");
     const winAlert = document.getElementById("rngArenaWinAlert");
     const financeInfo = document.getElementById("rngArenaFinanceInfo");
     const sessionSummaryHost = document.getElementById("rngArenaSessionSummary");
@@ -11297,6 +11554,11 @@ function renderRngArenaLive() {
 
     if (sessionSummaryHost) {
         sessionSummaryHost.innerHTML = renderRngArenaSessionSummary();
+    }
+
+    if (jackpotHost) {
+        jackpotHost.innerHTML = renderRngArenaJackpotTracker();
+        bindRngArenaJackpotEvents();
     }
 
     if (scoutHost) {
@@ -11596,6 +11858,7 @@ function showRngArena(gameKey = null, forcedPickCount = null, forcedSecondaryPic
             <div id="rngArenaStatus" class="rng-arena-status"></div>
             <div id="rngArenaWinAlert" class="rng-arena-win-alert empty"></div>
             <div id="rngArenaFirstPerfect" class="rng-arena-first-perfect"></div>
+            <div id="rngArenaJackpotTracker"></div>
             <div id="rngArenaSessionSummary"></div>
             <section id="rngArenaPlayers" class="rng-arena-players ${rngArenaState.user2Enabled ? "" : "two-players"}"></section>
 
